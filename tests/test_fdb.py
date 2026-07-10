@@ -1,3 +1,4 @@
+import os
 import json
 import time
 
@@ -667,6 +668,14 @@ class TestFdbLearn:
             "00:%02d:%02d:%02d:%02d:%02d" % (i, i, i, i, i) for i in range(1, len(cls.src_ports))
         ]
 
+    def _teardown_hardware(self, npu, topo):
+        try:
+            member = npu.get_vlan_member(topo.vlan10, topo.lag2_bp)
+            if member is not None:
+                npu.remove(member)
+        except BaseException:
+            pass
+
     def test_dynamic_mac_learn(self, npu, dataplane):
         """
         Description:
@@ -1131,7 +1140,61 @@ class TestFdbMacMove:
 
         cls.lag10_bp = self._lag10_bp
         cls.port24_bp = self._port24_bp
-        
+
+    def _teardown_hardware(self, npu, topo):
+        cls = type(self)
+
+        members = [
+            cls._vlan10_member4,
+            cls._vlan10_member3,
+            cls._vlan10_member1_ut
+        ]
+        for m in members:
+            if m is not None:
+                try:
+                    npu.remove(m)
+                except BaseException:
+                    pass
+        cls._vlan10_member4 = None
+        cls._vlan10_member3 = None
+        cls._vlan10_member1_ut = None
+
+        if cls._lag10_members:
+            for lm in reversed(cls._lag10_members):
+                try:
+                    npu.remove(lm)
+                except BaseException:
+                    pass
+            cls._lag10_members = []
+
+        if cls._lag10_bp is not None:
+            try:
+                npu.remove(cls._lag10_bp)
+            except BaseException:
+                pass
+            cls._lag10_bp = None
+
+        if cls._lag10 is not None:
+            try:
+                npu.remove(cls._lag10)
+            except BaseException:
+                pass
+            cls._lag10 = None
+
+        if cls._port24_bp is not None:
+            try:
+                npu.remove(cls._port24_bp)
+            except BaseException:
+                pass
+            cls._port24_bp = None
+
+        try:
+            if len(npu.port_oids) > 24:
+                npu.set(npu.port_oids[24], ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+            npu.set(topo.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+        except BaseException:
+            pass
+
     def test_dynamic_mac_move(self, npu, dataplane):
         """
         Description:
@@ -1365,6 +1428,39 @@ class TestFdbFlush:
         cls._vlan20_member1_ut = self.vlan20_member1_ut
         cls._vlan20_member2_ut = self.vlan20_member2_ut
 
+    def _teardown_hardware(self, npu, topo):
+        cls = type(self)
+
+        if cls.port24_bp is not None:
+            try:
+                npu.remove(cls.port24_bp)
+            except BaseException:
+                pass
+            cls.port24_bp = None
+
+        members_to_remove = [
+            cls.vlan10_member1_ut,
+            cls.vlan20_member1_ut,
+            cls.vlan20_member2_ut
+        ]
+        
+        for member in members_to_remove:
+            if member is not None:
+                try:
+                    npu.remove(member)
+                except BaseException:
+                    pass
+        
+        cls.vlan10_member1_ut = None
+        cls.vlan20_member1_ut = None
+        cls.vlan20_member2_ut = None
+
+        ports_to_reset = [topo.port1, topo.port3, topo.lag2]
+        for port in ports_to_reset:
+            try:
+                npu.set(port, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"], do_assert=False)
+            except BaseException:
+                pass
 
     def _prepare_fdb(self, npu, dataplane):
         npu.flush_fdb_entries(npu.switch_oid, ["SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"])
@@ -2502,6 +2598,35 @@ class TestFdbAge:
 
         npu.create_fdb(topo.vlan10, "00:12:34:56:78:90", cls._port24_bp)
 
+    def _teardown_hardware(self, npu, topo):
+        cls = type(self)
+
+        if cls._vlan10_member3 is not None:
+            try:
+                npu.remove(cls._vlan10_member3)
+            except BaseException:
+                pass
+            cls._vlan10_member3 = None
+
+        if cls._port24_bp is not None:
+            try:
+                npu.remove(cls._port24_bp)
+            except BaseException:
+                pass
+            cls._port24_bp = None
+
+        if cls._port24_oid is not None:
+            try:
+                npu.set(cls._port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"], do_assert=False)
+            except BaseException:
+                pass
+            cls._port24_oid = None
+            
+        try:
+            npu.set(npu.switch_oid, ["SAI_SWITCH_ATTR_FDB_AGING_TIME", "300"], do_assert=False)
+        except BaseException:
+            pass
+
     def _apply_class_variables(self, request, topo):
         cls = request.cls
         cls.vlan_oid = topo.vlan10
@@ -2735,9 +2860,9 @@ class TestFdbMiss:
             if cls._trap_group is not None: npu.remove(cls._trap_group)
             
             if len(npu.port_oids) > 26:
-                npu.set(npu.port_oids[24], ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
-                npu.set(npu.port_oids[25], ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
-                npu.set(npu.port_oids[26], ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+                npu.set(npu.port_oids[24], ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"], do_assert=False)
+                npu.set(npu.port_oids[25], ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"], do_assert=False)
+                npu.set(npu.port_oids[26], ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"], do_assert=False)
 
             if cls._vm0 is not None: npu.remove(cls._vm0)
             if cls._vm1 is not None: npu.remove(cls._vm1)
@@ -2784,9 +2909,9 @@ class TestFdbMiss:
         cls._vm2 = npu.create_vlan_member(cls._vlan100, cls._port26_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED")
 
         try:
-            npu.set(cls._port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
-            npu.set(cls._port25_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
-            npu.set(cls._port26_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
+            npu.set(cls._port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"], do_assert=False)
+            npu.set(cls._port25_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"], do_assert=False)
+            npu.set(cls._port26_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"], do_assert=False)
         except BaseException:
             pass
 
@@ -2832,6 +2957,46 @@ class TestFdbMiss:
         cls.port25_bp = self._port25_bp
         cls.port26_bp = self._port26_bp
 
+    def _teardown_hardware(self, npu, topo):
+        cls = type(self)
+
+        if cls._lldp_trap is not None:
+            npu.remove(cls._lldp_trap)
+            cls._lldp_trap = None
+        if cls._arp_trap is not None:
+            npu.remove(cls._arp_trap)
+            cls._arp_trap = None
+        if cls._trap_group is not None:
+            npu.remove(cls._trap_group)
+            cls._trap_group = None
+
+        if cls._vm0 is not None:
+            npu.remove(cls._vm0)
+            cls._vm0 = None
+        if cls._vm1 is not None:
+            npu.remove(cls._vm1)
+            cls._vm1 = None
+        if cls._vm2 is not None:
+            npu.remove(cls._vm2)
+            cls._vm2 = None
+
+        if cls._vlan100 is not None:
+            npu.remove(cls._vlan100)
+            cls._vlan100 = None
+        if cls._port24_bp is not None:
+            npu.remove(cls._port24_bp)
+            cls._port24_bp = None
+        if cls._port25_bp is not None:
+            npu.remove(cls._port25_bp)
+            cls._port25_bp = None
+        if cls._port26_bp is not None:
+            npu.remove(cls._port26_bp)
+            cls._port26_bp = None
+
+        ports = [npu.port_oids[24], npu.port_oids[25], npu.port_oids[26]]
+        for port_oid in ports:
+            npu.set(port_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"], do_assert=False)
+    
     def _queue_stat(self, npu, queue_oid):
         return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
 
