@@ -23,16 +23,155 @@ def skip_all(testbed_instance):
         pytest.skip('invalid for "{}" testbed'.format(testbed.name))
 
 
-@pytest.fixture(autouse=True)
-def on_prev_test_failure(prev_test_failed, npu):
-    if prev_test_failed:
-        npu.reset()
+class TopologyManager:
+    """
+    Manages SAI PTF topology lifecycle with safe recovery and explicit teardown.
+
+    Intended usage in this file:
+    1. A class-scoped fixture creates one manager instance.
+    2. A function-scoped topology fixture calls get_topology() before each test.
+    3. If previous test failed (or cleanup previously failed), hard reset path runs:
+       close context, reset NPU, clean Redis RPC queues, then recreate topology.
+    4. If no reset is needed, cached topology is reused.
+    5. Class teardown calls close(); close failures are recorded in session state.
+
+    This model implements strict isolation semantics:
+    - passed test -> next test may reuse topology
+    - failed test -> reset before next test
+    """
+
+    def __init__(self, npu):
+        """Initializes the manager with the target NPU."""
+        self.npu = npu
+        self.context = None
+        self.topo = None
+        self.last_close_failed = False
+
+    def get_topology(self):
+        """
+        Retrieves the active topology.
+        Creates a new context if one does not exist.
+        """
+        if self.topo is None:
+            try:
+                self.context = saichallenger.topologies.sai_ptf_topology.config(self.npu)
+                self.topo = self.context.__enter__()
+            except Exception:
+                self._recover_after_setup_failure()
+                self.context = saichallenger.topologies.sai_ptf_topology.config(self.npu)
+                self.topo = self.context.__enter__()
+        return self.topo
+
+    def _recover_after_setup_failure(self):
+        """Recover stale SAI state, then retry topology setup once."""
+        try:
+            if self.context is not None:
+                self.context.__exit__(None, None, None)
+        except Exception:
+            pass
+        finally:
+            self.context = None
+            self.topo = None
+
+        try:
+            self.npu.reset()
+        except Exception:
+            pass
+
+        time.sleep(2)
+
+        _cli = getattr(self.npu, "sai_client", None)
+        if _cli and hasattr(_cli, "r"):
+            try:
+                _cli.r.delete("ASIC_STATE_KEY_VALUE_OP_QUEUE")
+                _cli.r.delete("GETRESPONSE_KEY_VALUE_OP_QUEUE")
+            except Exception:
+                pass
+
+    def close(self):
+        """
+        Safely tears down the topology.
+        Swallow teardown exceptions so the next setup can still recover.
+        Returns True on successful close and False on cleanup failure.
+        """
+        if not self.context:
+            self.last_close_failed = False
+            return True
+
+        close_failed = False
+        try:
+            self.context.__exit__(None, None, None)
+        except Exception:
+            close_failed = True
+        finally:
+            self.context = None
+            self.topo = None
+            self.last_close_failed = close_failed
+
+        return not close_failed
 
 
-@pytest.fixture(scope="module")
-def sai_ptf_topology(npu):
-    with saichallenger.topologies.sai_ptf_topology.config(npu) as topo:
-        yield topo
+@pytest.fixture(scope="class")
+def sai_ptf_topology_manager(request, npu):
+    """
+    Provides one class-scoped TopologyManager.
+
+    Usage:
+    - Consumed indirectly by `sai_ptf_topology` (function-scoped).
+    - Keeps one manager instance per class, while topology can be reset per test.
+    - Teardown calls `manager.close()` and stores close failures in
+      `request.session._topology_cleanup_failed`.
+    """
+    manager = TopologyManager(npu)
+    if not hasattr(request.session, "_topology_cleanup_failed"):
+        request.session._topology_cleanup_failed = False
+
+    yield manager
+    if not manager.close():
+        request.session._topology_cleanup_failed = True
+
+
+@pytest.fixture(scope="function")
+def sai_ptf_topology(request, sai_ptf_topology_manager, prev_test_failed, npu):
+    """
+    Returns topology object for current test.
+
+    Reset policy:
+    - If previous test failed, force hard reset before providing topology.
+    - If previous topology close failed, also force hard reset.
+    - Otherwise reuse cached topology from manager.
+
+    Hard reset path performs:
+    1. manager.close()
+    2. npu.reset()
+    3. Redis RPC queue cleanup
+    """
+    need_hard_reset = prev_test_failed or getattr(request.session, "_topology_cleanup_failed", False)
+
+    if need_hard_reset:
+        if not sai_ptf_topology_manager.close():
+            request.session._topology_cleanup_failed = True
+
+        try:
+            npu.reset()
+            request.session._topology_cleanup_failed = False
+        except Exception:
+            request.session._topology_cleanup_failed = True
+
+        time.sleep(2)
+
+        _cli = getattr(npu, "sai_client", None)
+        if _cli and hasattr(_cli, "r"):
+            try:
+                _cli.r.delete("ASIC_STATE_KEY_VALUE_OP_QUEUE")
+                _cli.r.delete("GETRESPONSE_KEY_VALUE_OP_QUEUE")
+            except Exception:
+                pass
+
+    if request.cls:
+        request.session._last_run_class = request.cls
+
+    return sai_ptf_topology_manager.get_topology()
 
 
 def _fdb_entry_key(npu, vlan_oid, mac):
@@ -79,7 +218,7 @@ class TestFdbStaticMac:
     """
     Topology for FdbStaticMacTest: provides VLAN 10, lag1, bridge ports and PVIDs.
     """
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         request.cls.vlan_oid = topo.vlan10
@@ -172,7 +311,7 @@ class TestFdbAttribute:
     """
     Topology for FdbAttributeTest: provides VLAN 10, bridge port and test MAC address.
     """
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         request.cls.vlan_oid = topo.vlan10
@@ -220,7 +359,7 @@ class TestFdbNoLearn:
     """
     Topology for FdbNoLearnTest: VLAN 10 with port0/port1 and lag1.
     """
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         request.cls._topo = topo
@@ -496,7 +635,7 @@ class TestFdbLearn:
     """
     Topology for FdbLearnTest: VLAN 10 ports + lag1 and temporarily added lag2 (tagged).
     """
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         request.cls._topo = topo
@@ -894,7 +1033,7 @@ class TestFdbMacMove:
     Topology for FdbMacMoveTest: VLAN 10 with port1 untagged, extra access port24,
     static chck_mac on port24_bp, and lag10 (ports 25–27) in VLAN 10.
     """
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         if len(npu.port_oids) < 28:
@@ -1105,7 +1244,7 @@ class TestFdbFlush:
     Topology for FdbFlushTest: port1/port3/lag2 retagged like PTF, trunk stub on port24, dual flood+forward checks.
     """
 
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         if len(npu.port_oids) <= 24:
@@ -2315,7 +2454,7 @@ class TestFdbAge:
     Topology for FdbAgeTest: global FDB aging time, extra VLAN10 member on port24,
     static vrf_mac on port24_bp for routed verification traffic toward CPU path.
     """
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         if len(npu.port_oids) < 25:
@@ -2570,7 +2709,7 @@ class TestFdbMiss:
     Topology for FdbMissTest: VLAN 100 on ports 24–26, hostif trap group (queue 4) with ARP + LLDP traps.
     """
 
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         if len(npu.port_oids) <= 26:
             pytest.skip("FdbMissTest requires physical port indices 24–26 (27 ports)")
@@ -2996,7 +3135,7 @@ class TestFdbEvent:
     """
     Topology for FdbEventTest: validate FDB attributes on learn/age/move/flush/delete.
     """
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="function", autouse=True)
     def setup_teardown(self, request, npu, sai_ptf_topology):
         topo = sai_ptf_topology
         request.cls.vlan_oid = topo.vlan10
