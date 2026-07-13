@@ -2,6 +2,7 @@ import os
 import pytest
 
 curdir = os.path.dirname(os.path.realpath(__file__))
+
 from saichallenger.common.sai_npu import SaiNpu
 from saichallenger.common.sai_phy import SaiPhy
 from saichallenger.common.sai_testbed import SaiTestbed
@@ -61,29 +62,28 @@ def prev_test_failed():
 
 @pytest.fixture(scope="module", autouse=True)
 def track_module(request):
-    config = request.config
-    previous_test_module = getattr(config, "_current_test_module", None)
-    current_test_module = request.module.__name__
+    global _current_test_module
+    global _previous_test_module
+    global _last_failed_module
 
-    config._previous_test_module = previous_test_module
-    config._current_test_module = current_test_module
+    _previous_test_module = _current_test_module
+    _current_test_module = request.module.__name__
 
-    if previous_test_module != getattr(config, "_last_failed_module", None):
-        config._last_failed_module = None
+    if _previous_test_module != _last_failed_module:
+        _last_failed_module = None
 
 
 @pytest.fixture(scope="module")
 def prev_module_failed(track_module):
-    config = track_module.config
-    last_failed_module = getattr(config, "_last_failed_module", None)
-    current_test_module = getattr(config, "_current_test_module", None)
-    return last_failed_module is not None and last_failed_module != current_test_module
+    global _last_failed_module
+    global _current_test_module
+    return _last_failed_module is not None and _last_failed_module != _current_test_module
 
 
 @pytest.fixture(scope="module")
 def has_module_failed(request):
     def _check():
-        return getattr(request.config, "_module_failed", {}).get(request.module.__name__, False)
+        return _module_failed.get(request.module.__name__, False)
     yield _check
 
 
@@ -95,34 +95,6 @@ def pytest_addoption(parser):
 def pytest_sessionstart(session):
     SaiObjType.generate_from_thrift()
     SaiObjType.generate_from_json()
-
-
-def pytest_sessionfinish(session, exitstatus):
-    """
-    Final safety net: if topology cleanup failed and no next test can recover,
-    force one last hard reset before session exits.
-    """
-    if not getattr(session, "_topology_cleanup_failed", False):
-        return
-
-    npu = getattr(session, "_session_npu", None)
-    if npu is None:
-        return
-
-    try:
-        npu.reset()
-    except Exception:
-        pass
-
-    time.sleep(2)
-
-    _cli = getattr(npu, "sai_client", None)
-    if _cli and hasattr(_cli, "r"):
-        try:
-            _cli.r.delete("ASIC_STATE_KEY_VALUE_OP_QUEUE")
-            _cli.r.delete("GETRESPONSE_KEY_VALUE_OP_QUEUE")
-        except Exception:
-            pass
 
 
 @pytest.fixture(scope="session")
@@ -151,11 +123,9 @@ def testbed(testbed_instance):
 
 
 @pytest.fixture(scope="session")
-def npu(request, testbed_instance):
+def npu(testbed_instance):
     if len(testbed_instance.npu) == 1:
-        npu_obj = testbed_instance.npu[0]
-        request.session._session_npu = npu_obj
-        return npu_obj
+        return testbed_instance.npu[0]
     return None
 
 

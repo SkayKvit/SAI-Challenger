@@ -1,4 +1,3 @@
-import os
 import time
 
 import pytest
@@ -298,44 +297,6 @@ class TestL2Vlan:
         npu.remove(topo.port26_bp)
         npu.remove(topo.port25_bp)
         npu.remove(topo.port24_bp)
-
-    def _teardown_hardware(self, npu, topo):
-        cls = type(self)
-
-        members = [
-            cls._vlan_member41, cls._vlan_member42, cls._vlan_member43, cls._vlan_member44,
-            cls._vlan_member51, cls._vlan_member52, cls._vlan_member53, cls._vlan_member54,
-            cls._vlan_member61, cls._vlan_member62, cls._vlan_member63, cls._vlan_member64,
-            cls._vlan_member71, cls._vlan_member72, cls._vlan_member73, cls._vlan_member74,
-            cls._vlan10_member3, cls._vlan10_member4
-        ]
-        for m in members:
-            if m is not None:
-                npu.remove(m)
-        
-        cls._vlan_member41 = cls._vlan_member42 = cls._vlan_member43 = cls._vlan_member44 = None
-        cls._vlan_member51 = cls._vlan_member52 = cls._vlan_member53 = cls._vlan_member54 = None
-        cls._vlan_member61 = cls._vlan_member62 = cls._vlan_member63 = cls._vlan_member64 = None
-        cls._vlan_member71 = cls._vlan_member72 = cls._vlan_member73 = cls._vlan_member74 = None
-        cls._vlan10_member3 = cls._vlan10_member4 = None
-
-        if cls._lag_mbr31 is not None: npu.remove(cls._lag_mbr31); cls._lag_mbr31 = None
-        if cls._lag_mbr41 is not None: npu.remove(cls._lag_mbr41); cls._lag_mbr41 = None
-        if cls._lag10_bp is not None: npu.remove(cls._lag10_bp); cls._lag10_bp = None
-        if cls._lag11_bp is not None: npu.remove(cls._lag11_bp); cls._lag11_bp = None
-        if cls._lag10 is not None: npu.remove(cls._lag10); cls._lag10 = None
-        if cls._lag11 is not None: npu.remove(cls._lag11); cls._lag11 = None
-
-        for vlan in [cls._vlan40, cls._vlan50, cls._vlan60, cls._vlan70]:
-            if vlan is not None:
-                npu.remove(vlan)
-        cls._vlan40 = cls._vlan50 = cls._vlan60 = cls._vlan70 = None
-
-        for i in range(24, 32):
-            bp = getattr(topo, "port%d_bp" % i, None)
-            if bp is not None:
-                npu.remove(bp)
-                delattr(topo, "port%d_bp" % i)
 
     def _inc_vlan10_ucast(self):
         type(self).i_pkt_count += 1
