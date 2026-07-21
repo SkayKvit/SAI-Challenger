@@ -29,13 +29,13 @@ class TopologyManager:
 
     Intended usage in this file:
     1. A class-scoped fixture creates one manager instance.
-     2. A function-scoped topology fixture calls get_topology() before each test.
+    2. A function-scoped topology fixture calls get_topology() before each test.
     3. If previous test failed (or cleanup previously failed), hard reset path runs:
         close context, reset NPU, then recreate topology.
-     4. If no reset is needed, cached topology is reused.
-     5. Class teardown calls close(); close failures are recorded in session state.
+    4. If no reset is needed, cached topology is reused.
+    5. Class teardown calls close(); close failures are recorded in session state.
 
-     This model implements strict isolation semantics:
+    This model implements strict isolation semantics:
      - passed test -> next test may reuse topology
      - failed test -> reset before next test
     """
@@ -107,8 +107,8 @@ def sai_ptf_topology_manager(request, npu):
     Provides one class-scoped TopologyManager.
 
     Usage:
-        - Consumed indirectly by `sai_ptf_topology` (function-scoped).
-        - Keeps one manager instance per class, while topology can be reset per test.
+    - Consumed indirectly by `sai_ptf_topology` (function-scoped).
+    - Keeps one manager instance per class, while topology can be reset per test.
     - Teardown calls `manager.close()` and stores close failures in
       `request.session._topology_cleanup_failed`.
     """
@@ -143,9 +143,11 @@ def sai_ptf_topology(request, sai_ptf_topology_manager, prev_test_failed, npu):
 
         try:
             npu.reset()
-            request.session._topology_cleanup_failed = False
         except Exception:
             request.session._topology_cleanup_failed = True
+            pytest.fail("Failed to reset NPU before recreating SAI topology")
+
+        request.session._topology_cleanup_failed = False
 
     if request.cls:
         request.session._last_run_class = request.cls
@@ -187,11 +189,7 @@ def _should_run_setup_teardown(request, prev_test_failed):
     if prev_test_failed:
         setattr(cls, "_setup_teardown_done", False)
 
-    if not getattr(cls, "_setup_teardown_done", False):
-        setattr(cls, "_setup_teardown_done", True)
-        return True
-
-    return False
+    return not getattr(cls, "_setup_teardown_done", False)
 
 
 def _is_last_test_in_class(request):
@@ -223,6 +221,7 @@ def _mark_class_setup_active(request):
     """
     if request.cls is not None:
         setattr(request.cls, "_setup_teardown_active", True)
+        setattr(request.cls, "_setup_teardown_done", True)
 
 
 def _run_deferred_class_cleanup(request, cleanup_fn):
