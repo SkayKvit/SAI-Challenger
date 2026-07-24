@@ -1,5 +1,7 @@
 import json
 import time
+import logging
+logger = logging.getLogger(__name__)
 
 import pytest
 
@@ -28,7 +30,7 @@ class TopologyManager:
     Manages SAI PTF topology lifecycle with safe recovery and explicit teardown.
 
     Intended usage in this file:
-    1. A class-scoped fixture creates one manager instance.
+    1. A module-scoped fixture creates one manager instance per test module.
     2. A function-scoped topology fixture calls get_topology() before each test.
     3. If previous test failed (or cleanup previously failed), hard reset path runs:
         close context, reset NPU, then recreate topology.
@@ -67,16 +69,17 @@ class TopologyManager:
         try:
             if self.context is not None:
                 self.context.__exit__(None, None, None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to exit topology context during recovery: {e}")
         finally:
             self.context = None
             self.topo = None
 
         try:
             self.npu.reset()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Critical: NPU reset failed during recovery: {e}")
+            raise RuntimeError(f"NPU reset failed during topology recovery: {e}") from e
 
     def close(self):
         """
@@ -101,14 +104,14 @@ class TopologyManager:
         return not close_failed
 
 
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="module")
 def sai_ptf_topology_manager(request, npu):
     """
     Provides one class-scoped TopologyManager.
 
     Usage:
     - Consumed indirectly by `sai_ptf_topology` (function-scoped).
-    - Keeps one manager instance per class, while topology can be reset per test.
+    - Keeps one manager instance per module, while topology can be reset per test.
     - Teardown calls `manager.close()` and stores close failures in
       `request.session._topology_cleanup_failed`.
     """
@@ -138,14 +141,18 @@ def sai_ptf_topology(request, sai_ptf_topology_manager, prev_test_failed, npu):
     need_hard_reset = prev_test_failed or getattr(request.session, "_topology_cleanup_failed", False)
 
     if need_hard_reset:
-        if not sai_ptf_topology_manager.close():
-            request.session._topology_cleanup_failed = True
+        sai_ptf_topology_manager.close()
 
         try:
             npu.reset()
+            success_reset = True
         except Exception:
+            logger.error(f"NPU reset failed during topology hard-reset: {e}")
+            success_reset = False
+
+        if not success_reset:
             request.session._topology_cleanup_failed = True
-            pytest.fail("Failed to reset NPU before recreating SAI topology")
+            pytest.fail("Failed to reset NPU or cleanup topology before recreating SAI topology")
 
         request.session._topology_cleanup_failed = False
 
