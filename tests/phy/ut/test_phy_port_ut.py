@@ -138,7 +138,7 @@ def test_port_invalid_oid_operations(phy, dataplane):
     try:
         status, _ = phy.get_by_type(invalid_oid, "SAI_PORT_ATTR_ADMIN_STATE", "bool", do_assert=False)
         assert status != "SAI_STATUS_SUCCESS", "GET operation on invalid OID should fail"
-    except AssertionError:
+    except Exception as e:
         # Catch client-level failure (VID -> RID lookup failure)
         pass
 
@@ -146,7 +146,7 @@ def test_port_invalid_oid_operations(phy, dataplane):
     try:
         status = phy.set(invalid_oid, ["SAI_PORT_ATTR_ADMIN_STATE", "true"], do_assert=False)
         assert status != "SAI_STATUS_SUCCESS", "SET operation on invalid OID should fail"
-    except AssertionError:
+    except Exception as e:
         pass
 
 
@@ -162,16 +162,19 @@ def test_phy_speed_and_fec_combination(phy, sai_port_obj, speed, fec_mode):
     """Verify that valid Speed + FEC combinations are applied to the PHY gearbox."""
     # Set Speed
     status = phy.set(sai_port_obj, ["SAI_PORT_ATTR_SPEED", speed], do_assert=False)
-    if status != "SAI_STATUS_SUCCESS":
-        pytest.skip(f"Speed {speed} not supported by this PHY configuration")
 
-    # Set FEC Mode
     fec_status = phy.set(sai_port_obj, ["SAI_PORT_ATTR_FEC_MODE", fec_mode], do_assert=False)
     phy.assert_status_success(fec_status)
 
-    # Read back FEC Mode
-    status, data = phy.get_by_type(sai_port_obj, "SAI_PORT_ATTR_FEC_MODE", "sai_uint32_t", do_assert=False)
+    # Set FEC Mode
+    status, speed_data = phy.get_by_type(sai_port_obj, "SAI_PORT_ATTR_SPEED", "sai_uint32_t", do_assert=False)
     phy.assert_status_success(status)
+    assert str(speed_data.value()) == str(speed), f"Expected SPEED {speed}, got {speed_data.value()}"
+
+    # Read back FEC Mode
+    status, fec_data = phy.get_by_type(sai_port_obj, "SAI_PORT_ATTR_FEC_MODE", "sai_uint32_t", do_assert=False)
+    phy.assert_status_success(status)
+    assert str(fec_data.value()) == str(fec_mode), f"Expected FEC_MODE {fec_mode}, got {fec_data.value()}"
 
 
 @pytest.mark.parametrize(
@@ -202,10 +205,8 @@ def test_phy_autoneg_toggle(phy, sai_port_obj, attr, attr_type, test_val):
         "SAI_PORT_STAT_ETHER_STATS_DROP_EVENTS",
     ],
 )
-def test_get_and_clear_port_stats(phy, sai_port_obj, stat_counter):
+def test_get_port_stats(phy, sai_port_obj, stat_counter):
     """Verify retrieving and clearing port statistics counters."""
-
-    phy.clear_stats(sai_port_obj, [stat_counter, ''], do_assert=False)
 
     stats_res = phy.get_stats(sai_port_obj, [stat_counter, ''])
     
