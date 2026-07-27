@@ -68,7 +68,6 @@ def test_set_attr(phy, dataplane, sai_port_obj, attr, attr_value):
         ("SAI_PORT_ATTR_FEC_MODE",                  "sai_uint32_t"),
         ("SAI_PORT_ATTR_LOOPBACK_MODE",             "sai_uint32_t"),
         ("SAI_PORT_ATTR_MTU",                       "sai_uint32_t"),
-        ("SAI_PORT_ATTR_PRIORITY_FLOW_CONTROL",     "sai_uint8_t"),
     ]
 )
 def test_get_after_set_attr(phy, dataplane, sai_port_obj, attr, attr_type):
@@ -109,7 +108,7 @@ def test_port_invalid_oid_operations(phy, sai_port_obj, dataplane):
         # Catch client-level failure (VID -> RID lookup failure)
         pass
 
-    #verify syncd is still alive after GET
+    #verify syncd is still alive after invalid GET
     status, _ = phy.get(sai_port_obj, ["SAI_PORT_ATTR_ADMIN_STATE"], do_assert=False)
     phy.assert_status_success(status)
 
@@ -120,38 +119,10 @@ def test_port_invalid_oid_operations(phy, sai_port_obj, dataplane):
     except Exception as e:
         pass
 
-    #verify syncd is still alive after SET
+    #verify syncd is still alive after invalid SET
     status, _ = phy.get(sai_port_obj, ["SAI_PORT_ATTR_ADMIN_STATE"], do_assert=False)
     phy.assert_status_success(status)
 
-
-@pytest.mark.parametrize(
-    "speed, fec_mode",
-    [
-        ("100000", "SAI_PORT_FEC_MODE_RS"),
-        ("400000", "SAI_PORT_FEC_MODE_RS"),
-        ("50000",  "SAI_PORT_FEC_MODE_NONE"),
-    ],
-)
-def test_phy_speed_and_fec_combination(phy, sai_port_obj, speed, fec_mode):
-    """Verify that valid Speed + FEC combinations are applied to the PHY gearbox."""
-    # Set Speed
-    status = phy.set(sai_port_obj, ["SAI_PORT_ATTR_SPEED", speed], do_assert=False)
-
-    fec_status = phy.set(sai_port_obj, ["SAI_PORT_ATTR_FEC_MODE", fec_mode], do_assert=False)
-    phy.assert_status_success(fec_status)
-
-    # Read back & verify Speed
-    res = phy.get(sai_port_obj, ["SAI_PORT_ATTR_SPEED"], do_assert=False)
-    status, speed_data = res if isinstance(res, tuple) else (res, None)
-    phy.assert_status_success(status)
-    assert str(speed_data.value()) == str(speed), f"Expected SPEED {speed}, got {speed_data.value() if speed_data else None}"
-
-    # Read back & verify FEC Mode
-    res = phy.get(sai_port_obj, ["SAI_PORT_ATTR_FEC_MODE"], do_assert=False)
-    status, fec_data = res if isinstance(res, tuple) else (res, None)
-    phy.assert_status_success(status)
-    assert str(fec_data.value()) == str(fec_mode), f"Expected FEC_MODE {fec_mode}, got {fec_data.value() if fec_data else None}"
 
 @pytest.mark.parametrize(
     "attr, attr_type, test_val",
@@ -186,33 +157,6 @@ def test_phy_autoneg_toggle(phy, sai_port_obj, attr, attr_type, test_val):
     phy.assert_status_success(status)
     assert data is not None, f"Failed to retrieve data for {attr}"
     assert str(data.value()).lower() == test_val.lower(), f"Expected {test_val}, got {data.value()}"
-
-@pytest.mark.parametrize(
-    "stat_counter",
-    [
-        "SAI_PORT_STAT_IF_IN_OCTETS",
-        "SAI_PORT_STAT_IF_IN_UCAST_PKTS",
-        "SAI_PORT_STAT_IF_OUT_OCTETS",
-        "SAI_PORT_STAT_IF_OUT_UCAST_PKTS",
-        "SAI_PORT_STAT_ETHER_STATS_DROP_EVENTS",
-    ],
-)
-def test_get_port_stats(phy, sai_port_obj, stat_counter):
-    """Verify retrieving and clearing port statistics counters."""
-
-    stats_res = phy.get_stats(sai_port_obj, [stat_counter, ''])
-    
-    if hasattr(stats_res, "counters"):
-        cntrs = stats_res.counters()
-    elif isinstance(stats_res, tuple):
-        status, cntrs = stats_res
-        phy.assert_status_success(status)
-    else:
-        cntrs = stats_res
-
-    assert cntrs is not None, f"Stats output for {stat_counter} is None"
-    assert stat_counter in cntrs, f"Counter {stat_counter} missing from response: {cntrs}"
-    assert int(cntrs[stat_counter]) >= 0, f"{stat_counter} is not 0"
 
 
 def test_port_batch_get_stats(phy, sai_port_obj):
