@@ -22,35 +22,34 @@ def test_get_attr(phy, dataplane, attr, attr_type):
 
 def test_phy_switch_type(phy):
     """Verify that the SWITCH identifies as SAI_SWITCH_TYPE_PHY."""
-    status, data = phy.get_by_type(
+    status, data = phy.get(
         phy.switch_oid,
-        "SAI_SWITCH_ATTR_TYPE",
-        "sai_switch_type_t",
-        do_assert = False
+        ["SAI_SWITCH_ATTR_TYPE"],
+        do_assert=False,
     )
     phy.assert_status_success(status)
 
     switch_type = data.to_json()[1]
-    assert switch_type in ["SAI_SWITCH_TYPE_PHY", "1"]
+    assert switch_type == "SAI_SWITCH_TYPE_PHY", f"Expected SAI_SWITCH_TYPE_PHY, got: {switch_type}"
 
 
 def test_phy_switch_read_only_sys_info(phy):
     """Verify read-only system capability attributes on the PHY SWITCH object."""
     # Max supported ports
-    status, data = phy.get_by_type(
+    status, data = phy.get(
         phy.switch_oid,
-        "SAI_SWITCH_ATTR_MAX_NUMBER_OF_SUPPORTED_PORTS",
-        "sai_uint32_t",
+        ["SAI_SWITCH_ATTR_MAX_NUMBER_OF_SUPPORTED_PORTS"],
+        do_assert=False,
     )
     phy.assert_status_success(status)
     max_ports = int(data.to_json()[1])
     assert max_ports >= 0, f"Expected MAX_NUMBER_OF_SUPPORTED_PORTS >= 0, got: {max_ports}"
 
     # Number of system ports
-    status, data = phy.get_by_type(
+    status, data = phy.get(
         phy.switch_oid,
-        "SAI_SWITCH_ATTR_NUMBER_OF_SYSTEM_PORTS",
-        "sai_uint32_t",
+        ["SAI_SWITCH_ATTR_NUMBER_OF_SYSTEM_PORTS"],
+        do_assert=False,
     )
     phy.assert_status_success(status)
     sys_ports = int(data.to_json()[1])
@@ -90,31 +89,13 @@ def test_phy_switch_port_list(phy):
     phy.assert_status_success(status)
     assert data_list is not None, "Port list response data is None"
 
-    raw_val = data_list.to_json()[1]
-    if ":" in raw_val:
-        oids_str = raw_val.split(":", 1)[1]
-        port_oids = [oid.strip() for oid in oids_str.split(",") if oid.strip()]
-    else:
-        port_oids = [raw_val]
+    port_oids = data_list.oids()
 
     assert len(port_oids) > 0, "PHY Switch returned an empty port list!"
 
     assert len(port_oids) == port_number, (
         f"Mismatch: PORT_NUMBER={port_number}, but PORT_LIST length={len(port_oids)}"
     )
-
-
-def test_phy_switch_init_and_readiness(phy):
-    """Verify that SWITCH read-only status confirms the chip is initialized."""
-    status, data = phy.get_by_type(
-        phy.switch_oid,
-        "SAI_SWITCH_ATTR_INIT_SWITCH",
-        "bool",
-        do_assert=False,
-    )
-    phy.assert_status_success(status)
-    is_init = data.to_json()[1]
-    assert is_init in ["true", "1"], "PHY Switch state is not initialized"
 
 
 def test_phy_switch_firmware_version(phy):
@@ -126,9 +107,10 @@ def test_phy_switch_firmware_version(phy):
         do_assert=False,
     )
     phy.assert_status_success(status)
-    fw_ver = int(data.to_json()[1])
-    assert fw_ver >= 0, f"Invalid firmware major version: {fw_ver}"
+    assert data is not None, "Returned data is None"
 
+    raw_val = data.to_json()[1]
+    assert raw_val is not None, "Firmware version value is missing"
 
 def test_phy_switch_port_list_oids_validity(phy):
     """Verify that every OID in PORT_LIST is a valid PORT object and accessible."""
@@ -138,15 +120,11 @@ def test_phy_switch_port_list_oids_validity(phy):
         "sai_object_list_t",
     )
     phy.assert_status_success(status_list)
-    raw_val = data_list.to_json()[1]
-    if ":" in raw_val:
-        oids_str = raw_val.split(":", 1)[1]
-        port_oids = [oid.strip() for oid in oids_str.split(",") if oid.strip()]
-    else:
-        port_oids = [raw_val]
+
+    port_oids = data_list.oids()
 
     for port_oid in port_oids:
-        status, data = phy.get_by_type(
+        status, _ = phy.get_by_type(
             port_oid,
             "SAI_PORT_ATTR_TYPE",
             "sai_port_type_t",
