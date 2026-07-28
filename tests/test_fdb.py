@@ -1,5 +1,7 @@
 import json
 import time
+import logging
+logger = logging.getLogger(__name__)
 
 import pytest
 
@@ -23,16 +25,64 @@ def skip_all(testbed_instance):
         pytest.skip('invalid for "{}" testbed'.format(testbed.name))
 
 
-@pytest.fixture(autouse=True)
-def on_prev_test_failure(prev_test_failed, npu):
-    if prev_test_failed:
-        npu.reset()
+class TopologyManager:
+    """
+    Manages the SAI PTF topology lifecycle with caching and safe recovery capabilities.
+
+    Execution model:
+    1. A module-scoped fixture instantiates one manager per test module.
+    2. Test classes initialize their specific configuration lazily via a setup 
+       fixture using a class-level initialization flag (`_cls_initialized`).
+    3. `get_topology()` provides access to the active topology, reusing the cached 
+       instance across consecutive successful tests.
+    4. If a test fails (`prev_test_failed`), `reset()` closes the active context, 
+       invalidates the cache, and executes a hard reset on the NPU to guarantee 
+       a clean state for subsequent tests.
+    """
+
+    def __init__(self, npu):
+        """Initializes the manager with the target NPU."""
+        self.npu = npu
+        self._ctx = None
+        self.topo = None
+
+    def get_topology(self):
+        """
+        Retrieves the active topology.
+        Initializes a new `sai_ptf_topology.config()` context if none exists in cache.
+        """
+        if self.topo is None:
+            self._ctx = saichallenger.topologies.sai_ptf_topology.config(self.npu)
+            self.topo = self._ctx.__enter__()
+        return self.topo
+
+    def reset(self):
+        """
+        Tears down the active topology context, invalidates the cache (`topo = None`),
+        and executes a hard reset on the NPU.
+        """
+        if self._ctx is not None:
+            try:
+                self._ctx.__exit__(None, None, None)
+            except Exception as e:
+                logger.warning(f"Error closing topology context during reset: {e}")
+            finally:
+                self._ctx = None
+                self.topo = None
+
+        self.npu.reset()
 
 
 @pytest.fixture(scope="module")
-def sai_ptf_topology(npu):
-    with saichallenger.topologies.sai_ptf_topology.config(npu) as topo:
-        yield topo
+def sai_ptf_topology_manager(npu):
+    """
+    Persists the topology cache across successful tests within the module
+    and executes a final `manager.reset()` upon module completion to ensure 
+    the NPU is left in a clean state.
+    """
+    manager = TopologyManager(npu)
+    yield manager
+    manager.reset()
 
 
 def _fdb_entry_key(npu, vlan_oid, mac):
@@ -79,32 +129,51 @@ class TestFdbStaticMac:
     """
     Topology for FdbStaticMacTest: provides VLAN 10, lag1, bridge ports and PVIDs.
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, npu, sai_ptf_topology_manager, prev_test_failed):
+        """
+        Invoked before EACH test to check topology state, but applies full 
+        class configuration ONLY on the first run or after a test failure.
+        """
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
+
+        if not getattr(request.cls, "_cls_initialized", False):
+            topo = sai_ptf_topology_manager.get_topology()
+
+            request.cls.topo = topo
+            request.cls.vlan_oid = topo.vlan10
+            request.cls.vlan_id_int = 10
+            request.cls.lag_bp_oid = topo.lag1_bp
+            request.cls.dev_port0 = 0
+            request.cls.dev_port1 = 1
+            request.cls.lag_dev_ports = [4, 5, 6]
+            request.cls.port0_bp = topo.port0_bp
+            request.cls.port1_bp = topo.port1_bp
+            request.cls.macs = []
+
+            for i in range(1, 4):
+                request.cls.macs.append("00:%02d:%02d:%02d:%02d:%02d" % (i, i, i, i, i))
+            request.cls.dst_port_groups = [
+                [request.cls.dev_port0],
+                [request.cls.dev_port1],
+                request.cls.lag_dev_ports,
+            ]
+
+            npu.create_fdb(request.cls.vlan_oid, request.cls.macs[0], request.cls.port0_bp)
+            npu.create_fdb(request.cls.vlan_oid, request.cls.macs[1], request.cls.port1_bp)
+            npu.create_fdb(request.cls.vlan_oid, request.cls.macs[2], request.cls.lag_bp_oid)
+            request.cls._cls_initialized = True
+
     @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        request.cls.vlan_oid = topo.vlan10
-        request.cls.vlan_id_int = 10
-        request.cls.lag_bp_oid = topo.lag1_bp
-        request.cls.dev_port0 = 0
-        request.cls.dev_port1 = 1
-        request.cls.lag_dev_ports = [4, 5, 6]
-        request.cls.port0_bp = topo.port0_bp
-        request.cls.port1_bp = topo.port1_bp
-        request.cls.macs = []
-
-        for i in range(1, 4):
-            request.cls.macs.append("00:%02d:%02d:%02d:%02d:%02d" % (i, i, i, i, i))
-        request.cls.dst_port_groups = [
-            [request.cls.dev_port0],
-            [request.cls.dev_port1],
-            request.cls.lag_dev_ports,
-        ]
-
-        npu.create_fdb(request.cls.vlan_oid, request.cls.macs[0], request.cls.port0_bp)
-        npu.create_fdb(request.cls.vlan_oid, request.cls.macs[1], request.cls.port1_bp)
-        npu.create_fdb(request.cls.vlan_oid, request.cls.macs[2], request.cls.lag_bp_oid)
-
+    def teardown(self, request, npu):
+        """
+        Teardown fixture: cleans up resources AFTER test execution.
+        Starts with `yield`, waits for the test to complete, and flushes FDB entries.
+        """
         yield
+        request.cls._cls_initialized = False
         npu.flush_fdb_entries(
             npu.switch_oid,
             [
@@ -172,21 +241,37 @@ class TestFdbAttribute:
     """
     Topology for FdbAttributeTest: provides VLAN 10, bridge port and test MAC address.
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, npu, sai_ptf_topology_manager, prev_test_failed):
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+
+        if not getattr(request.cls, "_cls_initialized", False):
+            topo = sai_ptf_topology_manager.get_topology()
+
+            request.cls.topo = topo
+
+            request.cls.vlan_oid = topo.vlan10
+            request.cls.mac = "00:11:22:33:44:55"
+            request.cls.port0_bp = topo.port0_bp
+
+            npu.create_fdb(
+                request.cls.vlan_oid, request.cls.mac, request.cls.port0_bp
+            )
+            request.cls._cls_initialized = True
+
     @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        request.cls.vlan_oid = topo.vlan10
-        request.cls.mac = "00:11:22:33:44:55"
-        request.cls.port0_bp = topo.port0_bp
-
-        npu.create_fdb(request.cls.vlan_oid, request.cls.mac, request.cls.port0_bp)
-
+    def teardown(self, request, npu):
         yield
+        request.cls._cls_initialized = False
+
         npu.flush_fdb_entries(
             npu.switch_oid,
             [
-                "SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid,
-                "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL",
+                "SAI_FDB_FLUSH_ATTR_BV_ID",
+                request.cls.vlan_oid,
+                "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE",
+                "SAI_FDB_FLUSH_ENTRY_TYPE_ALL",
             ],
         )
 
@@ -220,24 +305,35 @@ class TestFdbNoLearn:
     """
     Topology for FdbNoLearnTest: VLAN 10 with port0/port1 and lag1.
     """
-    @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        request.cls._topo = topo
-        request.cls.vlan_oid = topo.vlan10
-        request.cls.vlan_id_int = 10
-        request.cls.port0_bp = topo.port0_bp
-        request.cls.port1_bp = topo.port1_bp
-        request.cls.lag1_bp = topo.lag1_bp
-        request.cls.vlan10_member0 = topo.vlan10_member0
-        request.cls.dev_port0 = 0
-        request.cls.dev_port1 = 1
-        request.cls.lag_ports = [4, 5, 6]
-        request.cls.port10 = topo.port10
-        request.cls.src_mac = "00:11:11:11:11:11"
-        request.cls.dst_mac = "00:22:22:22:22:22"
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, sai_ptf_topology_manager, prev_test_failed):
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
 
+        if not getattr(request.cls, "_cls_initialized", False):
+            topo = sai_ptf_topology_manager.get_topology()
+
+            request.cls._topo = topo
+            request.cls.vlan_oid = topo.vlan10
+            request.cls.vlan_id_int = 10
+            request.cls.port0_bp = topo.port0_bp
+            request.cls.port1_bp = topo.port1_bp
+            request.cls.lag1_bp = topo.lag1_bp
+            request.cls.vlan10_member0 = topo.vlan10_member0
+            request.cls.dev_port0 = 0
+            request.cls.dev_port1 = 1
+            request.cls.lag_ports = [4, 5, 6]
+            request.cls.port10 = topo.port10
+            request.cls.src_mac = "00:11:11:11:11:11"
+            request.cls.dst_mac = "00:22:22:22:22:22"
+            request.cls._cls_initialized = True
+
+    @pytest.fixture(scope="class", autouse=True)
+    def teardown(self, request, npu):
         yield
+        request.cls._cls_initialized = False
+        
         npu.flush_fdb_entries(
             npu.switch_oid,
             [
@@ -496,41 +592,51 @@ class TestFdbLearn:
     """
     Topology for FdbLearnTest: VLAN 10 ports + lag1 and temporarily added lag2 (tagged).
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, npu, sai_ptf_topology_manager, prev_test_failed):
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
+    
+        if not getattr(request.cls, "_cls_initialized", False):
+            topo = sai_ptf_topology_manager.get_topology()
+            request.cls._topo = topo
+            request.cls.vlan_oid = topo.vlan10
+            request.cls.vlan_id_int = 10
+            request.cls.dev_port0 = 0
+            request.cls.dev_port1 = 1
+            request.cls.utg_lag_ports = [4, 5, 6]
+            request.cls.tg_lag_ports = [7, 8, 9]
+            request.cls.dst_port_groups = [
+                [request.cls.dev_port0],
+                [request.cls.dev_port1],
+                request.cls.utg_lag_ports,
+                request.cls.tg_lag_ports,
+            ]
+            request.cls.port0_bp = topo.port0_bp
+            request.cls.port1_bp = topo.port1_bp
+            request.cls.lag1_bp = topo.lag1_bp
+            request.cls.lag2_bp = topo.lag2_bp
+            request.cls.lag1 = topo.lag1
+            request.cls.vlan10_member1 = topo.vlan10_member1
+            request.cls.lag1_member5 = topo.lag1_member5
+            request.cls.vlan10_member_lag2 = npu.create_vlan_member(
+                request.cls.vlan_oid, request.cls.lag2_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
+            )
+            request.cls.src_ports = [
+                request.cls.dev_port0,
+                request.cls.dev_port1,
+                4, 5, 6, 7, 8, 9,
+            ]
+            request.cls.macs = [
+                "00:%02d:%02d:%02d:%02d:%02d" % (i, i, i, i, i) for i in range(1, len(request.cls.src_ports))
+            ]
+            request.cls._cls_initialized = True
+
     @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        request.cls._topo = topo
-        request.cls.vlan_oid = topo.vlan10
-        request.cls.vlan_id_int = 10
-        request.cls.dev_port0 = 0
-        request.cls.dev_port1 = 1
-        request.cls.utg_lag_ports = [4, 5, 6]
-        request.cls.tg_lag_ports = [7, 8, 9]
-        request.cls.dst_port_groups = [
-            [request.cls.dev_port0],
-            [request.cls.dev_port1],
-            request.cls.utg_lag_ports,
-            request.cls.tg_lag_ports,
-        ]
-        request.cls.port0_bp = topo.port0_bp
-        request.cls.port1_bp = topo.port1_bp
-        request.cls.lag1_bp = topo.lag1_bp
-        request.cls.lag2_bp = topo.lag2_bp
-        request.cls.lag1 = topo.lag1
-        request.cls.vlan10_member1 = topo.vlan10_member1
-        request.cls.lag1_member5 = topo.lag1_member5
-        request.cls.vlan10_member_lag2 = npu.create_vlan_member(
-            request.cls.vlan_oid, request.cls.lag2_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
-        )
-        request.cls.src_ports = [
-            request.cls.dev_port0,
-            request.cls.dev_port1,
-            4, 5, 6, 7, 8, 9,
-        ]
-        request.cls.macs = [
-            "00:%02d:%02d:%02d:%02d:%02d" % (i, i, i, i, i) for i in range(1, len(request.cls.src_ports))
-        ]
+    def teardown(self, request, npu):
         yield
+        request.cls._cls_initialized = False
         npu.flush_fdb_entries(
             npu.switch_oid,
             ["SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid, "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"],
@@ -894,88 +1000,104 @@ class TestFdbMacMove:
     Topology for FdbMacMoveTest: VLAN 10 with port1 untagged, extra access port24,
     static chck_mac on port24_bp, and lag10 (ports 25–27) in VLAN 10.
     """
-    @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        if len(npu.port_oids) < 28:
-            pytest.skip("FdbMacMoveTest requires physical port indices 0–27 (28 ports)")
-        request.cls.vlan_oid = topo.vlan10
-        request.cls.port0_bp = topo.port0_bp
-        request.cls.port1_bp = topo.port1_bp
-        request.cls.lag1_bp = topo.lag1_bp
-        request.cls.port0 = topo.port0
-        request.cls.port1 = topo.port1
-        request.cls.lag1 = topo.lag1
-        request.cls.dev_port0 = 0
-        request.cls.dev_port1 = 1
-        request.cls.dev_port5 = 5
-        request.cls.dev_port24 = 24
-        request.cls.dev_port27 = 27
-        request.cls.lag1_ports = [4, 5, 6]
-        request.cls.lag3_ports = [25, 26, 27]
-        request.cls.moving_mac = "00:11:22:33:44:55"
-        request.cls.chck_mac = "00:11:11:11:11:11"
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, npu, sai_ptf_topology_manager, prev_test_failed):
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
 
-        old_vlan10_member1 = topo.vlan10_member1
-        npu.remove(old_vlan10_member1)
-        vlan10_member1_ut = npu.create_vlan_member(
-            request.cls.vlan_oid, topo.port1_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
-        )
-        npu.set(topo.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "10"])
+        if not getattr(request.cls, "_cls_initialized", False):
+            if len(npu.port_oids) < 28:
+                            pytest.skip("FdbMacMoveTest requires physical port indices 0–27 (28 ports)")
+            
+            topo = sai_ptf_topology_manager.get_topology()
+            request.cls.topo = topo
+            
+            request.cls.vlan_oid = topo.vlan10
+            request.cls.port0_bp = topo.port0_bp
+            request.cls.port1_bp = topo.port1_bp
+            request.cls.lag1_bp = topo.lag1_bp
+            request.cls.port0 = topo.port0
+            request.cls.port1 = topo.port1
+            request.cls.lag1 = topo.lag1
+            request.cls.dev_port0 = 0
+            request.cls.dev_port1 = 1
+            request.cls.dev_port5 = 5
+            request.cls.dev_port24 = 24
+            request.cls.dev_port27 = 27
+            request.cls.lag1_ports = [4, 5, 6]
+            request.cls.lag3_ports = [25, 26, 27]
+            request.cls.moving_mac = "00:11:22:33:44:55"
+            request.cls.chck_mac = "00:11:11:11:11:11"
 
-        port24_oid = npu.port_oids[24]
-        port24_bp = npu.create(
-            SaiObjType.BRIDGE_PORT,
-            [
-                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID", port24_oid,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
-            ],
-        )
-        vlan10_member3 = npu.create_vlan_member(
-            request.cls.vlan_oid, port24_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
-        )
-        npu.set(port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "10"])
-
-        lag10 = npu.create(SaiObjType.LAG, [])
-        lag10_bp = npu.create(
-            SaiObjType.BRIDGE_PORT,
-            [
-                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID", lag10,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
-            ],
-        )
-        lag10_members = []
-        for pidx in (25, 26, 27):
-            lag10_members.append(
-                npu.create(
-                    SaiObjType.LAG_MEMBER,
-                    [
-                        "SAI_LAG_MEMBER_ATTR_LAG_ID", lag10,
-                        "SAI_LAG_MEMBER_ATTR_PORT_ID", npu.port_oids[pidx],
-                    ],
-                )
+            old_vlan10_member1 = topo.vlan10_member1
+            npu.remove(old_vlan10_member1)
+            vlan10_member1_ut = npu.create_vlan_member(
+                request.cls.vlan_oid, topo.port1_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
             )
-        vlan10_member4 = npu.create_vlan_member(
-            request.cls.vlan_oid, lag10_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
-        )
-        npu.set(lag10, ["SAI_LAG_ATTR_PORT_VLAN_ID", "10"])
+            npu.set(topo.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "10"])
 
-        request.cls.lag10_bp = lag10_bp
-        request.cls.port24_bp = port24_bp
-        npu.create_fdb(request.cls.vlan_oid, request.cls.chck_mac, port24_bp)
+            port24_oid = npu.port_oids[24]
+            port24_bp = npu.create(
+                SaiObjType.BRIDGE_PORT,
+                [
+                    "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                    "SAI_BRIDGE_PORT_ATTR_PORT_ID", port24_oid,
+                    "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
+                ],
+            )
+            vlan10_member3 = npu.create_vlan_member(
+                request.cls.vlan_oid, port24_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
+            )
+            npu.set(port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "10"])
 
-        request.cls._topo = topo
-        request.cls._vlan10_member1_ut = vlan10_member1_ut
-        request.cls._port24_oid = port24_oid
-        request.cls._vlan10_member3 = vlan10_member3
-        request.cls._lag10 = lag10
-        request.cls._lag10_bp = lag10_bp
-        request.cls._lag10_members = lag10_members
-        request.cls._vlan10_member4 = vlan10_member4
+            lag10 = npu.create(SaiObjType.LAG, [])
+            lag10_bp = npu.create(
+                SaiObjType.BRIDGE_PORT,
+                [
+                    "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                    "SAI_BRIDGE_PORT_ATTR_PORT_ID", lag10,
+                    "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
+                ],
+            )
+            lag10_members = []
+            for pidx in (25, 26, 27):
+                lag10_members.append(
+                    npu.create(
+                        SaiObjType.LAG_MEMBER,
+                        [
+                            "SAI_LAG_MEMBER_ATTR_LAG_ID", lag10,
+                            "SAI_LAG_MEMBER_ATTR_PORT_ID", npu.port_oids[pidx],
+                        ],
+                    )
+                )
+            vlan10_member4 = npu.create_vlan_member(
+                request.cls.vlan_oid, lag10_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
+            )
+            npu.set(lag10, ["SAI_LAG_ATTR_PORT_VLAN_ID", "10"])
 
+            request.cls.lag10_bp = lag10_bp
+            request.cls.port24_bp = port24_bp
+            npu.create_fdb(request.cls.vlan_oid, request.cls.chck_mac, port24_bp)
+
+            request.cls._topo = topo
+            request.cls._vlan10_member1_ut = vlan10_member1_ut
+            request.cls._port24_oid = port24_oid
+            request.cls._vlan10_member3 = vlan10_member3
+            request.cls._lag10 = lag10
+            request.cls._lag10_bp = lag10_bp
+            request.cls._lag10_members = lag10_members
+            request.cls._vlan10_member4 = vlan10_member4
+            request.cls._cls_initialized = True
+            
+
+    @pytest.fixture(scope="class", autouse=True)
+    def teardown(self, request, npu):
         yield
+        request.cls._cls_initialized = False
+        topo = getattr(request.cls, "_topo", None)
+        if topo is None:
+            return
 
         npu.flush_fdb_entries(
             npu.switch_oid,
@@ -1105,12 +1227,26 @@ class TestFdbFlush:
     Topology for FdbFlushTest: port1/port3/lag2 retagged like PTF, trunk stub on port24, dual flood+forward checks.
     """
 
-    @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        if len(npu.port_oids) <= 24:
-            pytest.skip("FdbFlushTest requires physical port index 24 (25 ports)")
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, npu, sai_ptf_topology_manager, prev_test_failed):
+        """Setup topology and test state before execution."""
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
 
+        if not getattr(request.cls, "_cls_initialized", False):
+            if len(npu.port_oids) <= 24:
+                pytest.skip("FdbFlushTest requires physical port index 24 (25 ports)")
+
+            topo = sai_ptf_topology_manager.get_topology()
+
+            _m = npu.get_vlan_member(topo.vlan10, topo.port1_bp)
+            if _m is not None:
+                npu.remove(_m)
+            vlan10_member1_ut = npu.create_vlan_member(
+                topo.vlan10, topo.port1_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
+            )
+            npu.set(topo.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "10"])
         vlan10_oid = None
         vlan20_oid = None
         port24_bp = None
@@ -1151,6 +1287,7 @@ class TestFdbFlush:
                 "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
             ],
         )
+
 
         vlan10_oid = topo.vlan10
         vlan20_oid = topo.vlan20
@@ -1194,7 +1331,10 @@ class TestFdbFlush:
         request.cls._vlan10_member1_ut = vlan10_member1_ut
         request.cls._vlan20_member1_ut = vlan20_member1_ut
         request.cls._vlan20_member2_ut = vlan20_member2_ut
+        request.cls._cls_initialized = True
 
+    @pytest.fixture(scope="class", autouse=True)
+    def teardown(self, request, npu):
         yield
         # SAI-oriented teardown: flush FDB → remove VLAN members (incl. test trunk) →
         # remove objects we created (bridge port). Topology VLANs/LAGs are not removed here.
@@ -2317,39 +2457,54 @@ class TestFdbAge:
     Topology for FdbAgeTest: global FDB aging time, extra VLAN10 member on port24,
     static vrf_mac on port24_bp for routed verification traffic toward CPU path.
     """
+    @pytest.fixture(scope="function", autouse=True)
+
+    def setup(self, request, npu, sai_ptf_topology_manager, prev_test_failed):
+
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
+            
+
+        if not getattr(request.cls, "_cls_initialized", False):
+            if len(npu.port_oids) < 25:
+                    pytest.skip("FdbAgeTest requires physical port index 24 (25 ports)")
+
+            topo = sai_ptf_topology_manager.get_topology()
+
+            request.cls.topo = topo
+            request.cls.vlan_oid = topo.vlan10
+            request.cls.vlan_id_int = 10
+            request.cls.age_time = 10
+            request.cls.vrf_mac = "00:12:34:56:78:90"
+            request.cls.vrf_port_dev = 24
+
+            npu.set(npu.switch_oid, ["SAI_SWITCH_ATTR_FDB_AGING_TIME", str(request.cls.age_time)])
+
+            port24_oid = npu.port_oids[24]
+            port24_bp = npu.create(
+                SaiObjType.BRIDGE_PORT,
+                [
+                    "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                    "SAI_BRIDGE_PORT_ATTR_PORT_ID", port24_oid,
+                    "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
+                ],
+            )
+            vlan10_member3 = npu.create_vlan_member(
+                request.cls.vlan_oid, port24_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
+            )
+            npu.set(port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", str(request.cls.vlan_id_int)])
+            npu.create_fdb(request.cls.vlan_oid, request.cls.vrf_mac, port24_bp)
+
+            request.cls._port24_oid = port24_oid
+            request.cls._port24_bp = port24_bp
+            request.cls._vlan10_member3 = vlan10_member3
+            request.cls._cls_initialized = True
+
     @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        if len(npu.port_oids) < 25:
-            pytest.skip("FdbAgeTest requires physical port index 24 (25 ports)")
-        request.cls.vlan_oid = topo.vlan10
-        request.cls.vlan_id_int = 10
-        request.cls.age_time = 10
-        request.cls.vrf_mac = "00:12:34:56:78:90"
-        request.cls.vrf_port_dev = 24
-
-        npu.set(npu.switch_oid, ["SAI_SWITCH_ATTR_FDB_AGING_TIME", str(request.cls.age_time)])
-
-        port24_oid = npu.port_oids[24]
-        port24_bp = npu.create(
-            SaiObjType.BRIDGE_PORT,
-            [
-                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID", port24_oid,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
-            ],
-        )
-        vlan10_member3 = npu.create_vlan_member(
-            request.cls.vlan_oid, port24_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED"
-        )
-        npu.set(port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", str(request.cls.vlan_id_int)])
-        npu.create_fdb(request.cls.vlan_oid, request.cls.vrf_mac, port24_bp)
-
-        request.cls._port24_oid = port24_oid
-        request.cls._port24_bp = port24_bp
-        request.cls._vlan10_member3 = vlan10_member3
-
+    def teardown(self, request, npu):
         yield
+        request.cls._cls_initialized = False
 
         npu.flush_fdb_entries(
             npu.switch_oid,
@@ -2571,101 +2726,113 @@ class TestFdbMiss:
     """
     Topology for FdbMissTest: VLAN 100 on ports 24–26, hostif trap group (queue 4) with ARP + LLDP traps.
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, npu, sai_ptf_topology_manager, prev_test_failed):
+  
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
 
+        if not getattr(request.cls, "_cls_initialized", False):
+            if len(npu.port_oids) <= 26:
+                pytest.skip("FdbMissTest requires physical port indices 24–26 (27 ports)")
+
+            topo =  sai_ptf_topology_manager.get_topology()
+            port24_oid = npu.port_oids[24]
+            port25_oid = npu.port_oids[25]
+            port26_oid = npu.port_oids[26]
+
+            port24_bp = npu.create(
+                SaiObjType.BRIDGE_PORT,
+                [
+                    "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                    "SAI_BRIDGE_PORT_ATTR_PORT_ID", port24_oid,
+                    "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
+                ],
+            )
+            port25_bp = npu.create(
+                SaiObjType.BRIDGE_PORT,
+                [
+                    "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                    "SAI_BRIDGE_PORT_ATTR_PORT_ID", port25_oid,
+                    "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
+                ],
+            )
+            port26_bp = npu.create(
+                SaiObjType.BRIDGE_PORT,
+                [
+                    "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                    "SAI_BRIDGE_PORT_ATTR_PORT_ID", port26_oid,
+                    "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
+                ],
+            )
+
+            vlan100 = npu.create(SaiObjType.VLAN, ["SAI_VLAN_ATTR_VLAN_ID", "100"])
+            vm0 = npu.create_vlan_member(vlan100, port24_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED")
+            vm1 = npu.create_vlan_member(vlan100, port25_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED")
+            vm2 = npu.create_vlan_member(vlan100, port26_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED")
+
+            npu.set(port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
+            npu.set(port25_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
+            npu.set(port26_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
+
+            trap_group = npu.create(
+                "SAI_OBJECT_TYPE_HOSTIF_TRAP_GROUP",
+                ["SAI_HOSTIF_TRAP_GROUP_ATTR_QUEUE", "4"],
+            )
+            arp_trap = npu.create(
+                "SAI_OBJECT_TYPE_HOSTIF_TRAP",
+                [
+                    "SAI_HOSTIF_TRAP_ATTR_TRAP_TYPE", "SAI_HOSTIF_TRAP_TYPE_ARP_REQUEST",
+                    "SAI_HOSTIF_TRAP_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_TRAP",
+                    "SAI_HOSTIF_TRAP_ATTR_TRAP_GROUP", trap_group,
+                ],
+            )
+            lldp_trap = npu.create(
+                "SAI_OBJECT_TYPE_HOSTIF_TRAP",
+                [
+                    "SAI_HOSTIF_TRAP_ATTR_TRAP_TYPE", "SAI_HOSTIF_TRAP_TYPE_LLDP",
+                    "SAI_HOSTIF_TRAP_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_TRAP",
+                    "SAI_HOSTIF_TRAP_ATTR_TRAP_GROUP", trap_group,
+                ],
+            )
+
+            request.cls.topo = topo
+            request.cls.vlan_oid = vlan100
+            request.cls.send_port = 24
+            request.cls.flood_ports = [25, 26]
+            request.cls.src_mac = "00:11:11:11:11:11"
+            request.cls.dst_mac = "00:22:22:22:22:22"
+            request.cls.mcast_mac = "01:00:5e:11:22:33"
+            request.cls.bcast_mac = "ff:ff:ff:ff:ff:ff"
+            request.cls.lldp_mac = "01:80:c2:00:00:0e"
+            request.cls.ucast_pkt = simple_udp_packet(eth_dst=request.cls.dst_mac, eth_src=request.cls.src_mac)
+            request.cls.mcast_pkt = simple_udp_packet(eth_dst=request.cls.mcast_mac, eth_src=request.cls.src_mac)
+            request.cls.bcast_pkt = simple_udp_packet(eth_dst=request.cls.bcast_mac, eth_src=request.cls.src_mac)
+            request.cls.arp_pkt = simple_arp_packet(arp_op=1, pktlen=100)
+            request.cls.lldp_pkt = simple_eth_packet(
+                eth_dst=request.cls.lldp_mac, eth_src=request.cls.src_mac, pktlen=60, eth_type=0x88cc
+            )
+
+            request.cls._port24_oid = port24_oid
+            request.cls._port25_oid = port25_oid
+            request.cls._port26_oid = port26_oid
+            request.cls._port24_bp = port24_bp
+            request.cls._port25_bp = port25_bp
+            request.cls._port26_bp = port26_bp
+            request.cls._vlan100 = vlan100
+            request.cls._vm0 = vm0
+            request.cls._vm1 = vm1
+            request.cls._vm2 = vm2
+            request.cls._trap_group = trap_group
+            request.cls._arp_trap = arp_trap
+            request.cls._lldp_trap = lldp_trap
+            request.cls._cls_initialized = True
+            
     @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        if len(npu.port_oids) <= 26:
-            pytest.skip("FdbMissTest requires physical port indices 24–26 (27 ports)")
-        port24_oid = npu.port_oids[24]
-        port25_oid = npu.port_oids[25]
-        port26_oid = npu.port_oids[26]
-
-        port24_bp = npu.create(
-            SaiObjType.BRIDGE_PORT,
-            [
-                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID", port24_oid,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
-            ],
-        )
-        port25_bp = npu.create(
-            SaiObjType.BRIDGE_PORT,
-            [
-                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID", port25_oid,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
-            ],
-        )
-        port26_bp = npu.create(
-            SaiObjType.BRIDGE_PORT,
-            [
-                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID", port26_oid,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
-            ],
-        )
-
-        vlan100 = npu.create(SaiObjType.VLAN, ["SAI_VLAN_ATTR_VLAN_ID", "100"])
-        vm0 = npu.create_vlan_member(vlan100, port24_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED")
-        vm1 = npu.create_vlan_member(vlan100, port25_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED")
-        vm2 = npu.create_vlan_member(vlan100, port26_bp, "SAI_VLAN_TAGGING_MODE_UNTAGGED")
-
-        npu.set(port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
-        npu.set(port25_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
-        npu.set(port26_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "100"])
-
-        trap_group = npu.create(
-            "SAI_OBJECT_TYPE_HOSTIF_TRAP_GROUP",
-            ["SAI_HOSTIF_TRAP_GROUP_ATTR_QUEUE", "4"],
-        )
-        arp_trap = npu.create(
-            "SAI_OBJECT_TYPE_HOSTIF_TRAP",
-            [
-                "SAI_HOSTIF_TRAP_ATTR_TRAP_TYPE", "SAI_HOSTIF_TRAP_TYPE_ARP_REQUEST",
-                "SAI_HOSTIF_TRAP_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_TRAP",
-                "SAI_HOSTIF_TRAP_ATTR_TRAP_GROUP", trap_group,
-            ],
-        )
-        lldp_trap = npu.create(
-            "SAI_OBJECT_TYPE_HOSTIF_TRAP",
-            [
-                "SAI_HOSTIF_TRAP_ATTR_TRAP_TYPE", "SAI_HOSTIF_TRAP_TYPE_LLDP",
-                "SAI_HOSTIF_TRAP_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_TRAP",
-                "SAI_HOSTIF_TRAP_ATTR_TRAP_GROUP", trap_group,
-            ],
-        )
-
-        request.cls.vlan_oid = vlan100
-        request.cls.send_port = 24
-        request.cls.flood_ports = [25, 26]
-        request.cls.src_mac = "00:11:11:11:11:11"
-        request.cls.dst_mac = "00:22:22:22:22:22"
-        request.cls.mcast_mac = "01:00:5e:11:22:33"
-        request.cls.bcast_mac = "ff:ff:ff:ff:ff:ff"
-        request.cls.lldp_mac = "01:80:c2:00:00:0e"
-        request.cls.ucast_pkt = simple_udp_packet(eth_dst=request.cls.dst_mac, eth_src=request.cls.src_mac)
-        request.cls.mcast_pkt = simple_udp_packet(eth_dst=request.cls.mcast_mac, eth_src=request.cls.src_mac)
-        request.cls.bcast_pkt = simple_udp_packet(eth_dst=request.cls.bcast_mac, eth_src=request.cls.src_mac)
-        request.cls.arp_pkt = simple_arp_packet(arp_op=1, pktlen=100)
-        request.cls.lldp_pkt = simple_eth_packet(
-            eth_dst=request.cls.lldp_mac, eth_src=request.cls.src_mac, pktlen=60, eth_type=0x88cc
-        )
-
-        request.cls._port24_oid = port24_oid
-        request.cls._port25_oid = port25_oid
-        request.cls._port26_oid = port26_oid
-        request.cls._port24_bp = port24_bp
-        request.cls._port25_bp = port25_bp
-        request.cls._port26_bp = port26_bp
-        request.cls._vlan100 = vlan100
-        request.cls._vm0 = vm0
-        request.cls._vm1 = vm1
-        request.cls._vm2 = vm2
-        request.cls._trap_group = trap_group
-        request.cls._arp_trap = arp_trap
-        request.cls._lldp_trap = lldp_trap
-
+    def teardown(self, request, npu):
         yield
+        request.cls._cls_initialized = False
 
         npu.flush_fdb_entries(
             npu.switch_oid,
@@ -2998,16 +3165,28 @@ class TestFdbEvent:
     """
     Topology for FdbEventTest: validate FDB attributes on learn/age/move/flush/delete.
     """
+    @pytest.fixture(scope="function", autouse=True)
+    def setup(self, request, sai_ptf_topology_manager, prev_test_failed):
+        if prev_test_failed:
+            sai_ptf_topology_manager.reset()
+            request.cls._cls_initialized = False
+
+        if not getattr(request.cls, "_cls_initialized", False):
+            topo = sai_ptf_topology_manager.get_topology()
+        
+            request.cls.topo = topo
+            request.cls.vlan_oid = topo.vlan10
+            request.cls.port0_bp = topo.port0_bp
+            request.cls.lag1_bp = topo.lag1_bp
+            request.cls.vlan_id_int = 10
+            request.cls.src_mac = "00:11:11:11:11:11"
+            request.cls.dst_mac = "00:22:22:22:22:22"
+            request.cls._cls_initialized = True
+
     @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
-        request.cls.vlan_oid = topo.vlan10
-        request.cls.port0_bp = topo.port0_bp
-        request.cls.lag1_bp = topo.lag1_bp
-        request.cls.vlan_id_int = 10
-        request.cls.src_mac = "00:11:11:11:11:11"
-        request.cls.dst_mac = "00:22:22:22:22:22"
+    def teardown(self, request, npu):
         yield
+        request.cls._cls_initialized = False
         npu.flush_fdb_entries(
             npu.switch_oid,
             ["SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid, "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"],
