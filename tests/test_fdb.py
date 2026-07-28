@@ -230,19 +230,15 @@ class TestFdbAttribute:
     @pytest.fixture(scope="function", autouse=True)
     def setup(self, request, npu, get_topology):
         topo = get_topology
-        
         if not topo:
             return
 
         request.cls.topo = topo
-
         request.cls.vlan_oid = topo.vlan10
         request.cls.mac = "00:11:22:33:44:55"
         request.cls.port0_bp = topo.port0_bp
 
-        npu.create_fdb(
-            request.cls.vlan_oid, request.cls.mac, request.cls.port0_bp
-        )
+        npu.create_fdb(request.cls.vlan_oid, request.cls.mac, request.cls.port0_bp)
 
     @pytest.fixture(scope="class", autouse=True)
     def teardown(self, request, npu):
@@ -252,10 +248,8 @@ class TestFdbAttribute:
         npu.flush_fdb_entries(
             npu.switch_oid,
             [
-                "SAI_FDB_FLUSH_ATTR_BV_ID",
-                request.cls.vlan_oid,
-                "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE",
-                "SAI_FDB_FLUSH_ENTRY_TYPE_ALL",
+                "SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid,
+                "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL",
             ],
         )
 
@@ -292,7 +286,6 @@ class TestFdbNoLearn:
     @pytest.fixture(scope="function", autouse=True)
     def setup(self, request, npu, get_topology):
         topo = get_topology
-        
         if not topo:
             return
 
@@ -576,7 +569,6 @@ class TestFdbLearn:
     @pytest.fixture(scope="function", autouse=True)
     def setup(self, request, npu, get_topology):
         topo = get_topology
-        
         if not topo:
             return
         request.cls._topo = topo
@@ -981,11 +973,10 @@ class TestFdbMacMove:
     @pytest.fixture(scope="function", autouse=True)
     def setup(self, request, npu, get_topology):
         topo = get_topology
-        
         if not topo:
             return
-        request.cls.topo = topo
         
+        request.cls.topo = topo
         request.cls.vlan_oid = topo.vlan10
         request.cls.port0_bp = topo.port0_bp
         request.cls.port1_bp = topo.port1_bp
@@ -2422,7 +2413,6 @@ class TestFdbAge:
     @pytest.fixture(scope="function", autouse=True)
     def setup(self, request, npu, get_topology):
         topo = get_topology
-        
         if not topo:
             return
         if len(npu.port_oids) < 25:
@@ -2684,7 +2674,6 @@ class TestFdbMiss:
     @pytest.fixture(scope="function", autouse=True)
     def setup(self, request, npu, get_topology):
         topo = get_topology
-        
         if not topo:
             return
         if len(npu.port_oids) <= 26:
@@ -3119,7 +3108,6 @@ class TestFdbEvent:
     @pytest.fixture(scope="function", autouse=True)
     def setup(self, request, npu, get_topology):
         topo = get_topology
-        
         if not topo:
             return
     
