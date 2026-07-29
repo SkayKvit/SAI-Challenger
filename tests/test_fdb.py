@@ -125,11 +125,9 @@ class TestFdbStaticMac:
         class configuration ONLY on the first run or after a test failure.
         """
         topo = get_topology
-
         if not topo:
             return
         
-        request.cls.topo = topo
         request.cls.vlan_oid = topo.vlan10
         request.cls.vlan_id_int = 10
         request.cls.lag_bp_oid = topo.lag1_bp
@@ -233,7 +231,6 @@ class TestFdbAttribute:
         if not topo:
             return
 
-        request.cls.topo = topo
         request.cls.vlan_oid = topo.vlan10
         request.cls.mac = "00:11:22:33:44:55"
         request.cls.port0_bp = topo.port0_bp
@@ -976,7 +973,6 @@ class TestFdbMacMove:
         if not topo:
             return
         
-        request.cls.topo = topo
         request.cls.vlan_oid = topo.vlan10
         request.cls.port0_bp = topo.port0_bp
         request.cls.port1_bp = topo.port1_bp
@@ -1052,15 +1048,11 @@ class TestFdbMacMove:
         request.cls._lag10_bp = lag10_bp
         request.cls._lag10_members = lag10_members
         request.cls._vlan10_member4 = vlan10_member4
-            
 
     @pytest.fixture(scope="class", autouse=True)
     def teardown(self, request, npu):
         yield
         request.cls._cls_initialized = False
-        topo = getattr(request.cls, "_topo", None)
-        if topo is None:
-            return
 
         npu.flush_fdb_entries(
             npu.switch_oid,
@@ -1229,7 +1221,6 @@ class TestFdbFlush:
         )
         npu.set(topo.lag2, ["SAI_LAG_ATTR_PORT_VLAN_ID", "20"])
 
-
         port24_bp = npu.create(
             SaiObjType.BRIDGE_PORT,
             [
@@ -1238,7 +1229,6 @@ class TestFdbFlush:
                 "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
             ],
         )
-
 
         vlan10_oid = topo.vlan10
         vlan20_oid = topo.vlan20
@@ -1253,7 +1243,6 @@ class TestFdbFlush:
         request.cls.port24_bp = port24_bp
         request.cls.trunk_port_bp = port24_bp
         request.cls.trunk_dev_port = 24
-
 
         request.cls.dev_port0 = 0
         request.cls.dev_port1 = 1
@@ -1272,7 +1261,6 @@ class TestFdbFlush:
         request.cls.vlan10_dyn_macs = ["00:10:ff:%02d:%02d:%02d" % (i, i, i) for i in range(1, 6)]
         request.cls.vlan20_stat_macs = ["00:20:00:%02d:%02d:%02d" % (i, i, i) for i in range(1, 6)]
         request.cls.vlan20_dyn_macs = ["00:20:ff:%02d:%02d:%02d" % (i, i, i) for i in range(1, 6)]
-
 
         request.cls.tp10_stat_mac = "00:10:00:66:66:66"
         request.cls.tp10_dyn_mac = "00:10:ff:66:66:66"
@@ -2416,9 +2404,8 @@ class TestFdbAge:
         if not topo:
             return
         if len(npu.port_oids) < 25:
-                pytest.skip("FdbAgeTest requires physical port index 24 (25 ports)")
+            pytest.skip("FdbAgeTest requires physical port index 24 (25 ports)")
 
-        request.cls.topo = topo
         request.cls.vlan_oid = topo.vlan10
         request.cls.vlan_id_int = 10
         request.cls.age_time = 10
@@ -2679,7 +2666,6 @@ class TestFdbMiss:
         if len(npu.port_oids) <= 26:
             pytest.skip("FdbMissTest requires physical port indices 24–26 (27 ports)")
 
-        request.cls.topo = topo
         port24_oid = npu.port_oids[24]
         port25_oid = npu.port_oids[25]
         port26_oid = npu.port_oids[26]
@@ -3111,7 +3097,6 @@ class TestFdbEvent:
         if not topo:
             return
     
-        request.cls.topo = topo
         request.cls.vlan_oid = topo.vlan10
         request.cls.port0_bp = topo.port0_bp
         request.cls.lag1_bp = topo.lag1_bp
