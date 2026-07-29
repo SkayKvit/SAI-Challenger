@@ -1,12 +1,9 @@
 import json
 import time
-import logging
-logger = logging.getLogger(__name__)
 
 import pytest
 
-import saichallenger.topologies.sai_ptf_topology
-from saichallenger.topologies.sai_ptf_topology import SaiPtfTopologyFixture
+from saichallenger.topologies.sai_ptf_topology import topology
 from saichallenger.common.sai_data import SaiObjType
 from ptf.testutils import (
     send_packet,
@@ -25,15 +22,11 @@ def skip_all(testbed_instance):
     if testbed is not None and len(testbed.npu) != 1:
         pytest.skip('invalid for "{}" testbed'.format(testbed.name))
 
-@pytest.fixture(scope="module")
-def topology(npu):
-    return SaiPtfTopologyFixture()
-
 @pytest.fixture(scope="module", autouse=True)
 def register_topology(npu, topology):
     npu._topo = topology
     npu._topo_initialized = False
-    npu._topo.setup(npu)
+    npu._topo.setup()
     yield
     npu._topo.teardown()
  
@@ -42,7 +35,7 @@ def on_prev_test_failure(prev_test_failed, npu):
     if prev_test_failed:
         npu.reset()
         npu._topo_initialized = False
-        npu._topo.setup(npu)
+        npu._topo.setup()
 
 
 def _fdb_entry_key(npu, vlan_oid, mac):
