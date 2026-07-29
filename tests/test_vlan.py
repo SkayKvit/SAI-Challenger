@@ -3,7 +3,7 @@ import time
 import pytest
 from scapy.layers.l2 import Dot1Q
 
-import saichallenger.topologies.sai_ptf_topology
+from saichallenger.topologies.sai_ptf_topology import topology
 from saichallenger.common.sai_data import SaiObjType
 from ptf.testutils import (
     send_packet,
@@ -25,16 +25,20 @@ def skip_all(testbed_instance):
         pytest.skip('invalid for "{}" testbed'.format(testbed.name))
 
 
+@pytest.fixture(scope="module", autouse=True)
+def register_topology(npu, topology):
+    npu._topo = topology
+    npu._topo_initialized = False
+    npu._topo.setup()
+    yield
+    npu._topo.teardown()
+ 
 @pytest.fixture(autouse=True)
 def on_prev_test_failure(prev_test_failed, npu):
     if prev_test_failed:
         npu.reset()
-
-
-@pytest.fixture(scope="module")
-def sai_ptf_topology(npu):
-    with saichallenger.topologies.sai_ptf_topology.config(npu) as topo:
-        yield topo
+        npu._topo_initialized = False
+        npu._topo.setup()
 
 
 def _vlan_data(vlan_id, ports, untagged, large_port):
@@ -75,9 +79,12 @@ def _vlan_stats_map(npu, vlan_oid):
 
 
 class TestL2Vlan:
-    @pytest.fixture(scope="class", autouse=True)
-    def setup_teardown(self, request, npu, sai_ptf_topology):
-        topo = sai_ptf_topology
+    @pytest.fixture(autouse=True)
+    def setup_class(self, request, npu, topology):
+        topo = topology
+        if npu._topo_initialized:
+                    return
+        
         if len(npu.port_oids) < 32:
             pytest.skip("TestL2Vlan requires at least 32 ports (indices 0..31)")
 
@@ -223,9 +230,12 @@ class TestL2Vlan:
             request.cls.vlan70, request.cls.lag11_bp,
             "SAI_VLAN_TAGGING_MODE_UNTAGGED",
         )
+        npu._topo_initialized = True
 
+    @pytest.fixture(scope="class", autouse=True)
+    def teardown_class(self, request, npu):
         yield
-
+        npu._topo_initialized = False
         npu.set(request.cls.topo.port2, ["SAI_PORT_ATTR_PORT_VLAN_ID", "20"])
 
         for bv in (
