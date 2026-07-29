@@ -235,7 +235,6 @@ class TestL2Vlan:
     @pytest.fixture(scope="class", autouse=True)
     def teardown_class(self, request, npu):
         yield
-        npu._topo_initialized = False
         npu.set(request.cls.topo.port2, ["SAI_PORT_ATTR_PORT_VLAN_ID", "20"])
 
         for bv in (
@@ -307,6 +306,7 @@ class TestL2Vlan:
         npu.remove(request.cls.topo.port26_bp)
         npu.remove(request.cls.topo.port25_bp)
         npu.remove(request.cls.topo.port24_bp)
+        npu._topo_initialized = False
 
     def _inc_vlan10_ucast(self):
         type(self).i_pkt_count += 1
