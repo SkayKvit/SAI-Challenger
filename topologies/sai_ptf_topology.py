@@ -96,7 +96,7 @@ class SaiPtfTopologyMixin:
     default_vlan_id: str
     default_1q_bridge: str
 
-    def setup_ptf_topology(self, npu: Any) -> None:
+    def setup(self, npu: Any) -> None:
         """Initialize NPU reference, build aliases and bring up the full topology."""
         self.npu = npu
         self.def_bridge_port_list = []
@@ -125,7 +125,7 @@ class SaiPtfTopologyMixin:
         self.remove_default_bridge_ports()
         self.create_sai_helper_topology()
 
-    def teardown_ptf_topology(self) -> None:
+    def teardown(self) -> None:
         """Tear down topology in the correct SAI order and restore default VLAN state."""
         self.npu.set(self.port2, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
         self.npu.set(self.lag1, ["SAI_LAG_ATTR_PORT_VLAN_ID", "0"])
@@ -422,8 +422,8 @@ class SaiPtfTopologyFixture(SaiPtfTopologyMixin):
 @contextmanager
 def config(npu):
     topo = SaiPtfTopologyFixture()
-    topo.setup_ptf_topology(npu)
+    topo.setup(npu)
     try:
         yield topo
     finally:
-        topo.teardown_ptf_topology()
+        topo.teardown()
