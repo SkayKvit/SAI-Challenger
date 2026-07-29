@@ -1174,10 +1174,10 @@ class TestFdbFlush:
         request.cls.port1_bp = topo.port1_bp
         request.cls.port3_bp = topo.port3_bp
         request.cls.lag2_bp = topo.lag2_bp
-        request.cls.vlan10_bps = [topo.port0_bp, request.cls.port1_bp, topo.lag1_bp, topo.lag1_bp, topo.lag1_bp]
+        request.cls.vlan10_bps = [topo.port0_bp, topo.port1_bp, topo.lag1_bp, topo.lag1_bp, topo.lag1_bp]
         request.cls.vlan10_lag_ports = [4, 5, 6]
         request.cls.vlan20_ports = [2, 3, 7, 8, 9]
-        request.cls.vlan20_bps = [topo.port2_bp, request.cls.port3_bp, request.cls.lag2_bp, request.cls.lag2_bp, request.cls.lag2_bp]
+        request.cls.vlan20_bps = [topo.port2_bp, topo.port3_bp, topo.lag2_bp, topo.lag2_bp, topo.lag2_bp]
         request.cls.vlan20_lag_ports = [7, 8, 9]
         request.cls.vlan10_stat_macs = ["00:10:00:%02d:%02d:%02d" % (i, i, i) for i in range(1, 6)]
         request.cls.vlan10_dyn_macs = ["00:10:ff:%02d:%02d:%02d" % (i, i, i) for i in range(1, 6)]
