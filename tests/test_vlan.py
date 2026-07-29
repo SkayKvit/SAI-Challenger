@@ -226,10 +226,10 @@ class TestL2Vlan:
 
         yield
 
-        npu.set(topo.port2, ["SAI_PORT_ATTR_PORT_VLAN_ID", "20"])
+        npu.set(request.cls.topo.port2, ["SAI_PORT_ATTR_PORT_VLAN_ID", "20"])
 
         for bv in (
-            topo.vlan10,
+            request.cls.topo.vlan10,
             request.cls.vlan40,
             request.cls.vlan50,
             request.cls.vlan60,
@@ -248,10 +248,10 @@ class TestL2Vlan:
                 except Exception:
                     pass
 
-        npu.remove_fdb(topo.vlan10, self.mac0)
-        npu.remove_fdb(topo.vlan10, self.mac1)
-        npu.remove_fdb(topo.vlan10, self.mac2)
-        npu.remove_fdb(topo.vlan10, self.mac3)
+        npu.remove_fdb(request.cls.topo.vlan10, self.mac0)
+        npu.remove_fdb(request.cls.topo.vlan10, self.mac1)
+        npu.remove_fdb(request.cls.topo.vlan10, self.mac2)
+        npu.remove_fdb(request.cls.topo.vlan10, self.mac3)
 
         npu.set(npu.port_oids[24], ["SAI_PORT_ATTR_PORT_VLAN_ID", "1"])
 
@@ -289,14 +289,14 @@ class TestL2Vlan:
         npu.remove(request.cls.vlan60)
         npu.remove(request.cls.vlan70)
 
-        npu.remove(topo.port31_bp)
-        npu.remove(topo.port30_bp)
-        npu.remove(topo.port29_bp)
-        npu.remove(topo.port28_bp)
-        npu.remove(topo.port27_bp)
-        npu.remove(topo.port26_bp)
-        npu.remove(topo.port25_bp)
-        npu.remove(topo.port24_bp)
+        npu.remove(request.cls.topo.port31_bp)
+        npu.remove(request.cls.topo.port30_bp)
+        npu.remove(request.cls.topo.port29_bp)
+        npu.remove(request.cls.topo.port28_bp)
+        npu.remove(request.cls.topo.port27_bp)
+        npu.remove(request.cls.topo.port26_bp)
+        npu.remove(request.cls.topo.port25_bp)
+        npu.remove(request.cls.topo.port24_bp)
 
     def _inc_vlan10_ucast(self):
         type(self).i_pkt_count += 1

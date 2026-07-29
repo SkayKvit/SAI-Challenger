@@ -981,7 +981,7 @@ class TestFdbMacMove:
             npu.switch_oid,
             ["SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid, "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"],
         )
-        npu.set(topo.lag1, ["SAI_LAG_ATTR_PORT_VLAN_ID", "0"])
+        npu.set(request.cls.lag1, ["SAI_LAG_ATTR_PORT_VLAN_ID", "0"])
         npu.remove(request.cls._vlan10_member4)
         for lm in reversed(request.cls._lag10_members):
             npu.remove(lm)
@@ -990,12 +990,12 @@ class TestFdbMacMove:
         npu.set(request.cls._port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
         npu.remove(request.cls._vlan10_member3)
         npu.remove(request.cls.port24_bp)
-        npu.set(topo.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+        npu.set(request.cls.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
         npu.remove(request.cls._vlan10_member1_ut)
         new_member = npu.create_vlan_member(
-            request.cls.vlan_oid, topo.port1_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
+            request.cls.vlan_oid, request.cls.port1_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
         )
-        _refresh_topo_vlan_member(topo, "vlan10_member1", new_member)
+        _refresh_topo_vlan_member(request.cls._topo, "vlan10_member1", new_member)
 
     def test_dynamic_mac_move(self, npu, dataplane):
         """
@@ -1154,7 +1154,7 @@ class TestFdbFlush:
 
         vlan10_oid = topo.vlan10
         vlan20_oid = topo.vlan20
-
+        request.cls.topo = topo
         request.cls.vlan10 = vlan10_oid
         request.cls.vlan20 = vlan20_oid
         request.cls.vlan10_id = 10
@@ -1171,6 +1171,9 @@ class TestFdbFlush:
         request.cls.dev_port2 = 2
         request.cls.dev_port3 = 3
         request.cls.vlan10_ports = [0, 1, 4, 5, 6]
+        request.cls.port1_bp = topo.port1_bp
+        request.cls.port3_bp = topo.port3_bp
+        request.cls.lag2_bp = topo.lag2_bp
         request.cls.vlan10_bps = [topo.port0_bp, topo.port1_bp, topo.lag1_bp, topo.lag1_bp, topo.lag1_bp]
         request.cls.vlan10_lag_ports = [4, 5, 6]
         request.cls.vlan20_ports = [2, 3, 7, 8, 9]
@@ -1204,7 +1207,7 @@ class TestFdbFlush:
             or not hasattr(_cli, "vid_to_rid")
             or _cli.vid_to_rid(_sw) is not None
         )
-        if vlan10_oid is not None and vlan20_oid is not None and _switch_vid_ok:
+        if request.cls.vlan10 is not None and request.cls.vlan20 is not None and _switch_vid_ok:
             npu.flush_fdb_entries(
                 npu.switch_oid, ["SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"]
             )
@@ -1215,32 +1218,32 @@ class TestFdbFlush:
                 npu.remove(_mbr)
                 setattr(request.cls, _mbr_attr, None)
 
-        if port24_bp is not None:
-            npu.remove(port24_bp)
+        if request.cls.port24_bp is not None:
+            npu.remove(request.cls.port24_bp)
 
-        if vlan10_member1_ut is not None:
-            npu.set(topo.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
-            npu.remove(vlan10_member1_ut)
+        if request.cls._vlan10_member1_ut is not None:
+            npu.set(request.cls.port1, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+            npu.remove(request.cls._vlan10_member1_ut)
             new_member = npu.create_vlan_member(
-                topo.vlan10, topo.port1_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
+                request.cls.vlan10, request.cls.port1_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
             )
-            _refresh_topo_vlan_member(topo, "vlan10_member1", new_member)
+            _refresh_topo_vlan_member(request.cls.topo, "vlan10_member1", new_member)
 
-        if vlan20_member1_ut is not None:
-            npu.set(topo.port3, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
-            npu.remove(vlan20_member1_ut)
+        if request.cls._vlan20_member1_ut is not None:
+            npu.set(request.cls.port3, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+            npu.remove(request.cls._vlan20_member1_ut)
             new_member = npu.create_vlan_member(
-                topo.vlan20, topo.port3_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
+                request.cls.vlan20 , request.cls.port3_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
             )
-            _refresh_topo_vlan_member(topo, "vlan20_member1", new_member)
+            _refresh_topo_vlan_member(request.cls.topo, "vlan20_member1", new_member)
 
-        if vlan20_member2_ut is not None:
-            npu.set(topo.lag2, ["SAI_LAG_ATTR_PORT_VLAN_ID", "0"])
-            npu.remove(vlan20_member2_ut)
+        if request.cls._vlan20_member2_ut is not None:
+            npu.set(request.cls.lag2, ["SAI_LAG_ATTR_PORT_VLAN_ID", "0"])
+            npu.remove(request.cls._vlan20_member2_ut)
             new_member = npu.create_vlan_member(
-                topo.vlan20, topo.lag2_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
+                request.cls.vlan20, request.cls.lag2_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
             )
-            _refresh_topo_vlan_member(topo, "vlan20_member2", new_member)
+            _refresh_topo_vlan_member(request.cls.topo, "vlan20_member2", new_member)
 
     def _prepare_fdb(self, npu, dataplane):
         npu.flush_fdb_entries(npu.switch_oid, ["SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"])
@@ -2668,20 +2671,20 @@ class TestFdbMiss:
             npu.switch_oid,
             ["SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"],
         )
-        npu.remove(lldp_trap)
-        npu.remove(arp_trap)
-        npu.remove(trap_group)
+        npu.remove(request.cls._lldp_trap)
+        npu.remove(request.cls._arp_trap)
+        npu.remove(request.cls._trap_group)
 
-        npu.set(port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
-        npu.set(port25_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
-        npu.set(port26_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
-        npu.remove(vm0)
-        npu.remove(vm1)
-        npu.remove(vm2)
-        npu.remove(vlan100)
-        npu.remove(port24_bp)
-        npu.remove(port25_bp)
-        npu.remove(port26_bp)
+        npu.set(request.cls._port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+        npu.set(request.cls._port25_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+        npu.set(request.cls._port26_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
+        npu.remove(request.cls._vm0)
+        npu.remove(request.cls._vm1)
+        npu.remove(request.cls._vm2)
+        npu.remove(request.cls._vlan100)
+        npu.remove(request.cls._port24_bp)
+        npu.remove(request.cls._port25_bp)
+        npu.remove(request.cls._port26_bp)
 
     def _queue_stat(self, npu, queue_oid):
         return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
