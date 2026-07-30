@@ -96,9 +96,12 @@ class SaiPtfTopologyMixin:
     default_vlan_id: str
     default_1q_bridge: str
 
-    def setup_ptf_topology(self, npu: Any) -> None:
-        """Initialize NPU reference, build aliases and bring up the full topology."""
+    def __init__(self, npu: Any) -> None:
         self.npu = npu
+
+    def setup(self) -> None:
+        """Initialize NPU reference, build aliases and bring up the full topology."""
+
         self.def_bridge_port_list = []
         self.def_lag_list = []
         self.def_lag_member_list = []
@@ -107,25 +110,25 @@ class SaiPtfTopologyMixin:
         self.def_rif_list = []
         self._saved_default_vlan_members: List[Dict[str, str]] = []
 
-        self.switch_id = npu.switch_oid
-        self.default_vrf = npu.default_vrf_oid
-        self.default_vlan_oid = npu.default_vlan_oid
-        self.default_vlan_id = npu.default_vlan_id
-        self.default_1q_bridge = npu.dot1q_br_oid
+        self.switch_id = self.npu.switch_oid
+        self.default_vrf = self.npu.default_vrf_oid
+        self.default_vlan_oid = self.npu.default_vlan_oid
+        self.default_vlan_id = self.npu.default_vlan_id
+        self.default_1q_bridge = self.npu.dot1q_br_oid
 
-        if len(npu.port_oids) < 24:
+        if len(self.npu.port_oids) < 24:
             pytest.skip(
                 "SaiPtfTopologyMixin requires at least 24 active ports (indices 0 through 23)"
             )
 
         for i in range(24):
-            setattr(self, "port%d" % i, npu.port_oids[i])
+            setattr(self, "port%d" % i, self.npu.port_oids[i])
 
         self.remove_default_vlan_members()
         self.remove_default_bridge_ports()
         self.create_sai_helper_topology()
 
-    def teardown_ptf_topology(self) -> None:
+    def teardown(self) -> None:
         """Tear down topology in the correct SAI order and restore default VLAN state."""
         self.npu.set(self.port2, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
         self.npu.set(self.lag1, ["SAI_LAG_ATTR_PORT_VLAN_ID", "0"])
@@ -421,9 +424,14 @@ class SaiPtfTopologyFixture(SaiPtfTopologyMixin):
 
 @contextmanager
 def config(npu):
-    topo = SaiPtfTopologyFixture()
-    topo.setup_ptf_topology(npu)
+    topo = SaiPtfTopologyFixture(npu)
+    topo.setup()
     try:
         yield topo
     finally:
-        topo.teardown_ptf_topology()
+        topo.teardown()
+
+
+@pytest.fixture(scope="module")
+def topology(npu):
+    return SaiPtfTopologyFixture(npu)
