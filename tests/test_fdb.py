@@ -264,6 +264,7 @@ class TestFdbNoLearn:
         request.cls.port10 = topo.port10
         request.cls.src_mac = "00:11:11:11:11:11"
         request.cls.dst_mac = "00:22:22:22:22:22"
+        npu._topo_initialized = True
 
     @pytest.fixture(scope="class", autouse=True)
     def teardown_class(self, request, npu):
@@ -564,16 +565,14 @@ class TestFdbLearn:
         request.cls.macs = [
             "00:%02d:%02d:%02d:%02d:%02d" % (i, i, i, i, i) for i in range(1, len(request.cls.src_ports))
         ]
+        npu._topo_initialized = True
 
     @pytest.fixture(scope="class", autouse=True)
     def teardown_class(self, request, npu):
         yield
         npu.flush_fdb_entries(
             npu.switch_oid,
-            [
-                "SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid,
-                "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL",
-            ],
+            ["SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid, "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"],
         )
         npu._topo_initialized = False
 
@@ -3279,8 +3278,5 @@ class TestFdbEvent:
         finally:
             npu.flush_fdb_entries(
                 npu.switch_oid,
-                [
-                "SAI_FDB_FLUSH_ATTR_BV_ID", self.vlan_oid,
-                "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL",
-            ],
+                ["SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"],
             )
