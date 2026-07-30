@@ -83,7 +83,7 @@ class TestL2Vlan:
     def setup_class(self, request, npu, topology):
         topo = topology
         if npu._topo_initialized:
-                    return
+            return
         
         if len(npu.port_oids) < 32:
             pytest.skip("TestL2Vlan requires at least 32 ports (indices 0..31)")
