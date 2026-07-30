@@ -556,7 +556,6 @@ class TestFdbLearn:
         request.cls.vlan10_member_lag2 = npu.create_vlan_member(
             request.cls.vlan_oid, request.cls.lag2_bp, "SAI_VLAN_TAGGING_MODE_TAGGED"
         )
-        topo.def_vlan_member_list.append(request.cls.vlan10_member_lag2)
         request.cls.src_ports = [
             request.cls.dev_port0,
             request.cls.dev_port1,
@@ -574,6 +573,7 @@ class TestFdbLearn:
             npu.switch_oid,
             ["SAI_FDB_FLUSH_ATTR_BV_ID", request.cls.vlan_oid, "SAI_FDB_FLUSH_ATTR_ENTRY_TYPE", "SAI_FDB_FLUSH_ENTRY_TYPE_ALL"],
         )
+        npu.remove(request.cls.vlan10_member_lag2)
         npu._topo_initialized = False
 
     def test_dynamic_mac_learn(self, npu, dataplane):
