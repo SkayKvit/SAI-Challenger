@@ -41,6 +41,7 @@ class SaiRedisClient(SaiClient):
         self.libsaivs = cfg["saivs"]
         self.asic_channel = None
         self.asic_db = 9 if cfg["asic_type"] is "phy" else 1
+        self.restart_query = "GB_ASIC_DB_RESTARTQUERY" if cfg["asic_type"] is "phy" else "RESTARTQUERY"
 
         self.is_dut_mbr = cfg.get("mode") is not None
 
@@ -572,7 +573,7 @@ class SaiRedisClient(SaiClient):
 
     def pre_shutdown(self, tout=30):
         pre_shutdown_msg = json.dumps(["PRE-SHUTDOWN", "PRE-SHUTDOWN"])
-        self.r.publish("RESTARTQUERY", pre_shutdown_msg)
+        self.r.publish(self.restart_query, pre_shutdown_msg)
 
         # wait for pre-shutdown to succeed
         successful_pre_shutdown = False
@@ -593,7 +594,7 @@ class SaiRedisClient(SaiClient):
         self.state_db.hset("WARM_RESTART_ENABLE_TABLE|syncd", "enable", "true")
 
         warm_shutdown_msg = json.dumps(["WARM", "WARM"])
-        self.r.publish("RESTARTQUERY", warm_shutdown_msg)
+        self.r.publish(self.restart_query, warm_shutdown_msg)
 
         # wait for warm-shutdown to succeed
         successful_warm_shutdown = False
