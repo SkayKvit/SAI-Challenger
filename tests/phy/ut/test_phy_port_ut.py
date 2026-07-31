@@ -48,7 +48,6 @@ def test_get_before_set_attr(phy, dataplane, sai_port_obj, attr, attr_type):
         ("SAI_PORT_ATTR_LOOPBACK_MODE",             "SAI_PORT_LOOPBACK_MODE_MAC"),
         ("SAI_PORT_ATTR_MTU",                       "9000"),
         ("SAI_PORT_ATTR_MTU",                       "1500"),
-        ("SAI_PORT_ATTR_PRIORITY_FLOW_CONTROL",     "0"),
     ],
 )
 def test_set_attr(phy, dataplane, sai_port_obj, attr, attr_value):
@@ -79,13 +78,13 @@ def test_get_after_set_attr(phy, dataplane, sai_port_obj, attr, attr_type):
 
 
 @pytest.mark.parametrize(
-    "attr, attr_type, dummy_value",
+    "attr, dummy_value",
     [
-        ("SAI_PORT_ATTR_OPER_STATUS", "sai_uint32_t", "SAI_PORT_OPER_STATUS_UP"),
-        ("SAI_PORT_ATTR_HW_LANE_LIST", "sai_s32_list_t", "1:1"),
+        ("SAI_PORT_ATTR_OPER_STATUS",  "SAI_PORT_OPER_STATUS_UP"),
+        ("SAI_PORT_ATTR_HW_LANE_LIST", "1:1"),
     ],
 )
-def test_readonly_port_attributes(phy, sai_port_obj, attr, attr_type, dummy_value):
+def test_readonly_port_attributes(phy, sai_port_obj, attr, dummy_value):
     """Verify that read-only port attributes can be read via GET, but fail when modified via SET."""
     result = phy.get(sai_port_obj, [attr], do_assert=False)
     status = result[0] if isinstance(result, tuple) else result

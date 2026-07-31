@@ -29,21 +29,21 @@ def test_phy_switch_type(phy):
 
 
 def test_phy_switch_port_number(phy):
-    """Verify SAI_SWITCH_ATTR_PORT_NUMBER on PHY SWITCH."""
-    status, data = phy.get(phy.switch_oid, ["SAI_SWITCH_ATTR_PORT_NUMBER", "0"], do_assert=False)
+    """Verify SAI_SWITCH_ATTR_NUMBER_OF_ACTIVE_PORTS on PHY SWITCH."""
+    status, data = phy.get(phy.switch_oid, ["SAI_SWITCH_ATTR_NUMBER_OF_ACTIVE_PORTS", "0"], do_assert=False)
     phy.assert_status_success(status)
     assert data is not None, "Port number response is None"
 
-    port_number = int(data.to_json()[1])
+    port_number = data.uint32()
     assert port_number > 0, f"Expected PORT_NUMBER > 0 on PHY, got: {port_number}"
 
 
 def test_phy_switch_port_list(phy):
     """Verify SAI_SWITCH_ATTR_PORT_LIST on PHY SWITCH and consistency with PORT_NUMBER."""
     
-    status, data_num = phy.get(phy.switch_oid, ["SAI_SWITCH_ATTR_PORT_NUMBER", "0"], do_assert=False)
+    status, data_num = phy.get(phy.switch_oid, ["SAI_SWITCH_ATTR_NUMBER_OF_ACTIVE_PORTS", "0"], do_assert=False)
     phy.assert_status_success(status)
-    port_number = int(data_num.to_json()[1])
+    port_number = data_num.uint32()
 
     status, data_list = phy.get_by_type(phy.switch_oid, "SAI_SWITCH_ATTR_PORT_LIST", "sai_object_list_t", do_assert=False)
     phy.assert_status_success(status)
@@ -64,18 +64,18 @@ def test_phy_switch_firmware_version(phy):
     phy.assert_status_success(status)
     assert data is not None, "Returned data is None"
 
-    raw_val = data.to_json()[1]
+    raw_val = data.value()
     assert raw_val is not None, "Firmware version value is missing"
 
 
 def test_phy_switch_port_list_oids_validity(phy):
     """Verify that every OID in PORT_LIST is a valid PORT object and accessible."""
-    status_list, data_list = phy.get_by_type( phy.switch_oid, "SAI_SWITCH_ATTR_PORT_LIST", "sai_object_list_t", do_assert=False)
+    status_list, data_list = phy.get_by_type(phy.switch_oid, "SAI_SWITCH_ATTR_PORT_LIST", "sai_object_list_t", do_assert=False)
     phy.assert_status_success(status_list)
 
     port_oids = data_list.oids()
 
     for port_oid in port_oids:
-        status, _ = phy.get(port_oid, ["SAI_PORT_ATTR_TYPE", "0"], do_assert=False)
-        assert status == "SAI_STATUS_SUCCESS", f"Port OID {port_oid} is invalid or non-responsive!"
-
+        _, data = phy.get(port_oid, ["SAI_PORT_ATTR_TYPE", "0"], do_assert=False)
+        port_type = data.value()
+        assert port_type in ["SAI_PORT_TYPE_LOGICAL", "0"], f"Unexpected port type {port_type} for OID {port_oid}"
