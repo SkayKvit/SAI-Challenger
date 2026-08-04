@@ -415,6 +415,12 @@ class SaiPtfTopologyMixin:
 
         self.create_default_routes()
 
+    def _cpu_queue(self, idx=0):
+        """Retrieves the CPU QoS queue OID at the specified index (default is 0)."""
+        cpu_port = self.npu.get(self.npu.switch_oid, ["SAI_SWITCH_ATTR_CPU_PORT", "oid:0x0"], False)[1].oid()
+        queues = self.npu.get_list(cpu_port, "SAI_PORT_ATTR_QOS_QUEUE_LIST", "oid:0x0")
+        return queues[idx]
+
 
 class SaiPtfTopologyFixture(SaiPtfTopologyMixin):
     """Thin subclass used by the topology context manager."""
