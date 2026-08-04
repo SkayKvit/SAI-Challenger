@@ -192,6 +192,15 @@ class SaiNpu(Sai):
         assert vlan_mbr_oid, f"Bridge Port {bp_oid} is not a member of VLAN {vlan_oid}"
         self.remove(vlan_mbr_oid)
 
+    def _route_entry_key(self, vr_oid, prefix):
+        return "SAI_OBJECT_TYPE_ROUTE_ENTRY:" + json.dumps(
+            {
+                "dest": prefix,
+                "switch_id": self.switch_oid,
+                "vr": vr_oid,
+            }
+        )
+    
     def create_route(self, dest, vrf_oid, nh_oid=None, opt_attr=None):
         attrs = []
         if nh_oid:
@@ -199,22 +208,10 @@ class SaiNpu(Sai):
         if opt_attr is None:
             opt_attr = []
         attrs += opt_attr
-        self.create('SAI_OBJECT_TYPE_ROUTE_ENTRY:' + json.dumps(
-                        {
-                             "dest":      dest,
-                             "switch_id": self.switch_oid,
-                             "vr":        vrf_oid
-                        }
-                   ), attrs)
+        self.create(self._route_entry_key(vrf_oid, dest), attrs)
 
     def remove_route(self, dest, vrf_oid):
-        self.remove('SAI_OBJECT_TYPE_ROUTE_ENTRY:' + json.dumps(
-                       {
-                           "dest":      dest,
-                           "switch_id": self.switch_oid,
-                           "vr":        vrf_oid
-                       })
-                    )
+        self.remove(self._route_entry_key(vrf_oid, dest))
 
     def hostif_dataplane_start(self, ifaces):
         self.hostif_map = dict()
@@ -331,3 +328,12 @@ class SaiNpu(Sai):
             if i + 1 < tout:
                 time.sleep(1)
         assert False, f"The port {port_oid} is still down after {tout} seconds..."
+
+    def _neighbor_entry_key(npu, rif_oid, ip):
+        return "SAI_OBJECT_TYPE_NEIGHBOR_ENTRY:" + json.dumps(
+            {
+                "ip": ip,
+                "rif": rif_oid,
+                "switch_id": npu.switch_oid,
+            }
+        )
