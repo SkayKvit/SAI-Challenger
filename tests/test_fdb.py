@@ -2692,6 +2692,7 @@ class TestFdbMiss:
             ],
         )
 
+        request.cls.topo = topo
         request.cls.vlan_oid = vlan100
         request.cls.send_port = 24
         request.cls.flood_ports = [25, 26]
@@ -2748,11 +2749,6 @@ class TestFdbMiss:
 
     def _queue_stat(self, npu, queue_oid):
         return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
-
-    def _cpu_queue(self, npu, idx):
-        cpu_port = npu.get(npu.switch_oid, ["SAI_SWITCH_ATTR_CPU_PORT", "oid:0x0"], False)[1].oid()
-        queues = npu.get_list(cpu_port, "SAI_PORT_ATTR_QOS_QUEUE_LIST", "oid:0x0")
-        return queues[idx]
 
     def _restore_unicast_fwd(self, npu):
         npu.set(npu.switch_oid, ["SAI_SWITCH_ATTR_FDB_UNICAST_MISS_PACKET_ACTION", "SAI_PACKET_ACTION_FORWARD"])
@@ -2812,7 +2808,7 @@ class TestFdbMiss:
             assert st == "SAI_STATUS_SUCCESS"
             assert data.value() == "SAI_PACKET_ACTION_COPY"
             time.sleep(4)
-            q0 = self._cpu_queue(npu, 0)
+            q0 = self.topo._cpu_queue(0)
             pre_stats = self._queue_stat(npu, q0)
             send_packet(dataplane, self.send_port, self.ucast_pkt)
             verify_packets(dataplane, self.ucast_pkt, self.flood_ports)
@@ -2841,7 +2837,7 @@ class TestFdbMiss:
             assert st == "SAI_STATUS_SUCCESS"
             assert data.value() == "SAI_PACKET_ACTION_TRAP"
             time.sleep(4)
-            q0 = self._cpu_queue(npu, 0)
+            q0 = self.topo._cpu_queue(0)
             pre_stats = self._queue_stat(npu, q0)
             send_packet(dataplane, self.send_port, self.ucast_pkt)
             time.sleep(4)
@@ -2871,7 +2867,7 @@ class TestFdbMiss:
             send_packet(dataplane, self.send_port, self.mcast_pkt)
             verify_no_other_packets(dataplane)
             time.sleep(4)
-            q4 = self._cpu_queue(npu, 4)
+            q4 = self.topo._cpu_queue(4)
             pre_stats = self._queue_stat(npu, q4)
             send_packet(dataplane, self.send_port, self.lldp_pkt)
             time.sleep(4)
@@ -2899,7 +2895,7 @@ class TestFdbMiss:
             assert st == "SAI_STATUS_SUCCESS"
             assert data.value() == "SAI_PACKET_ACTION_COPY"
             time.sleep(4)
-            q0 = self._cpu_queue(npu, 0)
+            q0 = self.topo._cpu_queue(0)
             pre0 = self._queue_stat(npu, q0)
             send_packet(dataplane, self.send_port, self.mcast_pkt)
             verify_packets(dataplane, self.mcast_pkt, self.flood_ports)
@@ -2907,7 +2903,7 @@ class TestFdbMiss:
             post0 = self._queue_stat(npu, q0)
             assert post0 - pre0 >= 1
             time.sleep(4)
-            q4 = self._cpu_queue(npu, 4)
+            q4 = self.topo._cpu_queue(4)
             pre4 = self._queue_stat(npu, q4)
             send_packet(dataplane, self.send_port, self.lldp_pkt)
             time.sleep(4)
@@ -2935,14 +2931,14 @@ class TestFdbMiss:
             assert st == "SAI_STATUS_SUCCESS"
             assert data.value() == "SAI_PACKET_ACTION_TRAP"
             time.sleep(4)
-            q0 = self._cpu_queue(npu, 0)
+            q0 = self.topo._cpu_queue(0)
             pre0 = self._queue_stat(npu, q0)
             send_packet(dataplane, self.send_port, self.mcast_pkt)
             time.sleep(4)
             post0 = self._queue_stat(npu, q0)
             assert post0 - pre0 >= 1
             time.sleep(4)
-            q4 = self._cpu_queue(npu, 4)
+            q4 = self.topo._cpu_queue(4)
             pre4 = self._queue_stat(npu, q4)
             send_packet(dataplane, self.send_port, self.lldp_pkt)
             time.sleep(4)
@@ -2972,7 +2968,7 @@ class TestFdbMiss:
             send_packet(dataplane, self.send_port, self.bcast_pkt)
             verify_no_other_packets(dataplane)
             time.sleep(4)
-            q4 = self._cpu_queue(npu, 4)
+            q4 = self.topo._cpu_queue(4)
             pre_stats = self._queue_stat(npu, q4)
             send_packet(dataplane, self.send_port, self.arp_pkt)
             time.sleep(4)
@@ -3000,7 +2996,7 @@ class TestFdbMiss:
             assert st == "SAI_STATUS_SUCCESS"
             assert data.value() == "SAI_PACKET_ACTION_COPY"
             time.sleep(4)
-            q0 = self._cpu_queue(npu, 0)
+            q0 = self.topo._cpu_queue(0)
             pre0 = self._queue_stat(npu, q0)
             send_packet(dataplane, self.send_port, self.bcast_pkt)
             verify_packets(dataplane, self.bcast_pkt, self.flood_ports)
@@ -3008,7 +3004,7 @@ class TestFdbMiss:
             post0 = self._queue_stat(npu, q0)
             assert post0 - pre0 >= 1
             time.sleep(4)
-            q4 = self._cpu_queue(npu, 4)
+            q4 = self.topo._cpu_queue(4)
             pre4 = self._queue_stat(npu, q4)
             send_packet(dataplane, self.send_port, self.arp_pkt)
             time.sleep(4)
@@ -3036,14 +3032,14 @@ class TestFdbMiss:
             assert st == "SAI_STATUS_SUCCESS"
             assert data.value() == "SAI_PACKET_ACTION_TRAP"
             time.sleep(4)
-            q0 = self._cpu_queue(npu, 0)
+            q0 = self.topo._cpu_queue(0)
             pre0 = self._queue_stat(npu, q0)
             send_packet(dataplane, self.send_port, self.bcast_pkt)
             time.sleep(4)
             post0 = self._queue_stat(npu, q0)
             assert post0 - pre0 >= 1
             time.sleep(4)
-            q4 = self._cpu_queue(npu, 4)
+            q4 = self.topo._cpu_queue(4)
             pre4 = self._queue_stat(npu, q4)
             send_packet(dataplane, self.send_port, self.arp_pkt)
             time.sleep(4)
