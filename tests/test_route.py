@@ -264,11 +264,11 @@ class TestRouteUpdate:
                 send_packet(dataplane, dev_port11, pkt)
                 verify_packet(dataplane, exp_pkt_2, dev_port10)
         finally:
-            npu.remove(route_key, False)
-            npu.remove(nhop_2, False)
-            npu.remove(neighbor_entry_2, False)
-            npu.remove(nhop_1, False)
-            npu.remove(neighbor_key_1, False)
+            npu.remove(route_key)
+            npu.remove(nhop_2)
+            npu.remove(neighbor_entry_2)
+            npu.remove(nhop_1)
+            npu.remove(neighbor_key_1)
 
 
 class TestRouteIngressRif:
@@ -583,7 +583,7 @@ class TestRemoveAddNeighbor:
                 verify_packet_any_port(dataplane, exp_pkt, lag_dev_ports)
         finally:
             npu.remove_route(route_ip, vrf_oid)
-            npu.remove(neighbor_key, False)
+            npu.remove(neighbor_key)
 
 
 class TestRouteNeighborCollision:
@@ -600,7 +600,6 @@ class TestRouteNeighborCollision:
         self.vrf_oid = self.topo.default_vrf
         self.rif_oid = self.topo.port10_rif
         self.neighbor_key = npu._neighbor_entry_key(self.rif_oid, self.ip_addr)
-        route_key = npu._route_entry_key(self.vrf_oid, self.route_ip)
         
         npu.create(self.neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dst_mac])
         nhop = npu.create(
@@ -666,7 +665,8 @@ class TestRouteNeighborCollision:
                 send_packet(dataplane, self.dev_port11, pkt)
                 verify_no_other_packets(dataplane)
 
-                npu.create_route(self.route_ip, self.vrf_oid, self.rif_oid)
+            npu.create_route(self.route_ip, self.vrf_oid, self.rif_oid)
+            if npu.run_traffic:
                 pre_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
                 send_packet(dataplane, self.dev_port11, pkt)
                 time.sleep(4)
@@ -677,9 +677,9 @@ class TestRouteNeighborCollision:
                 send_packet(dataplane, self.dev_port11, pkt)
                 verify_packets(dataplane, exp_pkt, [self.dev_port10])
         finally:
-            npu.remove(route_key, False)
-            npu.remove(nhop, False)
-            npu.remove(self.neighbor_key, False)
+            npu.remove(npu._route_entry_key(self.vrf_oid, self.route_ip))
+            npu.remove(nhop)
+            npu.remove(self.neighbor_key)
 
 
 class L3DirBcastRouteTestHelper:
@@ -911,11 +911,11 @@ class TestDirBcastGleanAndForward(L3DirBcastRouteTestHelper):
         finally:
             npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
             npu.remove_route(self.ip_addr2_subnet, self.vrf_oid)
-            npu.remove(nhop1, False)
-            npu.remove(nhop2, False)
-            npu.remove(neighbor1, False)
-            npu.remove(neighbor2, False)
-            npu.remove(neighbor0, False)
+            npu.remove(nhop1)
+            npu.remove(nhop2)
+            npu.remove(neighbor1)
+            npu.remove(neighbor2)
+            npu.remove(neighbor0)
 
 
 class TestDirBcastForward(L3DirBcastRouteTestHelper):
@@ -954,9 +954,9 @@ class TestDirBcastForward(L3DirBcastRouteTestHelper):
         finally:
             npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
             npu.remove_route(self.ip_addr2_subnet, self.vrf_oid)
-            npu.remove(nhop1, False)
-            npu.remove(nhop2, False)
-            npu.remove(neighbor1, False)
-            npu.remove(neighbor2, False)
-            npu.remove(neighbor0, False)
+            npu.remove(nhop1)
+            npu.remove(nhop2)
+            npu.remove(neighbor1)
+            npu.remove(neighbor2)
+            npu.remove(neighbor0)
 
