@@ -72,7 +72,7 @@ jobs:
 
     - name: Run tests
       run: ./exec.sh --no-tty pytest --testbed=saivs_standalone -v test_l2_basic.py -v test_vrf.py -v test_dc_t1.py
-    - name: Run FDB, VLAN and ROUTE functional tests
+    - name: Run function tests converted from PTF format
       run: ./exec.sh --no-tty pytest --testbed=saivs_standalone -v test_fdb.py test_vlan.py test_route.py
     - name: Run flex counters test cases
       run: ./exec.sh --no-tty pytest --testbed=saivs_standalone -v -k "test_flex_counters"
@@ -101,7 +101,7 @@ jobs:
 
     - name: Run thrift tests
       run: ./exec.sh --no-tty -s thrift pytest --testbed=saivs_thrift_standalone -v test_l2_basic.py -v test_vrf.py -v test_dc_t1.py
-    - name: Run FDB, VLAN and ROUTE functional tests
+    - name: Run function tests converted from PTF format
       run: ./exec.sh --no-tty -s thrift pytest --testbed=saivs_thrift_standalone -v test_fdb.py test_vlan.py test_route.py
     - name: Run thrift flex counters test cases
       run: ./exec.sh --no-tty -s thrift pytest --testbed=saivs_thrift_standalone -v -k "test_flex_counters"

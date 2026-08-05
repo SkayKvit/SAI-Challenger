@@ -199,8 +199,6 @@ class TestRouteUpdate:
         )
         npu.create_route(route_ip, vrf_oid, nhop_1)
 
-        neighbor_entry_2 = None
-        nhop_2 = None
         try:
             if npu.run_traffic:
                 pkt = simple_tcp_packet(
@@ -228,19 +226,20 @@ class TestRouteUpdate:
                 send_packet(dataplane, dev_port11, pkt)
                 verify_packet(dataplane, exp_pkt_1, dev_port10)
 
-                neighbor_entry_2 = npu._neighbor_entry_key(rif_oid, nhop_ip_2)
-                npu.create(
-                    neighbor_entry_2,
-                    ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", dst_mac_2],
-                )
-                nhop_2 = npu.create(
-                    SaiObjType.NEXT_HOP,
-                    [
-                        "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
-                        "SAI_NEXT_HOP_ATTR_IP", nhop_ip_2,
-                        "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", rif_oid,
-                    ],
-                )
+            neighbor_entry_2 = npu._neighbor_entry_key(rif_oid, nhop_ip_2)
+            npu.create(
+                neighbor_entry_2,
+                ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", dst_mac_2],
+            )
+            nhop_2 = npu.create(
+                SaiObjType.NEXT_HOP,
+                [
+                    "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
+                    "SAI_NEXT_HOP_ATTR_IP", nhop_ip_2,
+                    "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", rif_oid,
+                ],
+            )
+            if npu.run_traffic:
                 npu.set(route_key, ["SAI_ROUTE_ENTRY_ATTR_NEXT_HOP_ID", nhop_2])
                 send_packet(dataplane, dev_port11, pkt)
                 verify_packet(dataplane, exp_pkt_2, dev_port10)
@@ -266,10 +265,8 @@ class TestRouteUpdate:
                 verify_packet(dataplane, exp_pkt_2, dev_port10)
         finally:
             npu.remove(route_key, False)
-            if nhop_2 is not None:
-                npu.remove(nhop_2, False)
-            if neighbor_entry_2 is not None:
-                npu.remove(neighbor_entry_2, False)
+            npu.remove(nhop_2, False)
+            npu.remove(neighbor_entry_2, False)
             npu.remove(nhop_1, False)
             npu.remove(neighbor_key_1, False)
 
@@ -490,8 +487,6 @@ class TestCpuForward:
         cpu_port = npu.get(npu.switch_oid, ["SAI_SWITCH_ATTR_CPU_PORT", "oid:0x0"], False)[1].oid()
         npu.create_route(route_ip, vrf_oid, cpu_port)
 
-        trap_group = None
-        trap = None
         try:
             if npu.run_traffic:
                 pkt = simple_tcp_packet(
@@ -506,22 +501,22 @@ class TestCpuForward:
                 send_packet(dataplane, dev_port10, pkt)
                 verify_no_other_packets(dataplane, timeout=3)
 
-                trap_group = npu.create(
-                    "SAI_OBJECT_TYPE_HOSTIF_TRAP_GROUP",
-                    [
-                        "SAI_HOSTIF_TRAP_GROUP_ATTR_ADMIN_STATE", "true",
-                        "SAI_HOSTIF_TRAP_GROUP_ATTR_QUEUE", "4",
-                    ],
-                )
-                trap = npu.create(
-                    "SAI_OBJECT_TYPE_HOSTIF_TRAP",
-                    [
-                        "SAI_HOSTIF_TRAP_ATTR_TRAP_GROUP", trap_group,
-                        "SAI_HOSTIF_TRAP_ATTR_TRAP_TYPE", "SAI_HOSTIF_TRAP_TYPE_IP2ME",
-                        "SAI_HOSTIF_TRAP_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_TRAP",
-                    ],
-                )
-
+            trap_group = npu.create(
+                "SAI_OBJECT_TYPE_HOSTIF_TRAP_GROUP",
+                [
+                    "SAI_HOSTIF_TRAP_GROUP_ATTR_ADMIN_STATE", "true",
+                    "SAI_HOSTIF_TRAP_GROUP_ATTR_QUEUE", "4",
+                ],
+            )
+            trap = npu.create(
+                "SAI_OBJECT_TYPE_HOSTIF_TRAP",
+                [
+                    "SAI_HOSTIF_TRAP_ATTR_TRAP_GROUP", trap_group,
+                    "SAI_HOSTIF_TRAP_ATTR_TRAP_TYPE", "SAI_HOSTIF_TRAP_TYPE_IP2ME",
+                    "SAI_HOSTIF_TRAP_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_TRAP",
+                ],
+            )
+            if npu.run_traffic:
                 cpu_queue4 = topo._cpu_queue(4)
                 pre_stats = topo.get_counter(cpu_queue4, "SAI_QUEUE_STAT_PACKETS")
 
@@ -534,12 +529,10 @@ class TestCpuForward:
                     f"pre={pre_stats}, post={post_stats}"
                 )
         finally:
-            if trap is not None:
-                npu.remove(trap)
-            if trap_group is not None:
-                npu.remove(trap_group)
+            npu.remove(trap)
+            npu.remove(trap_group)
             npu.remove_route(route_ip, vrf_oid)
-
+            
 
 class TestRemoveAddNeighbor:
     """Verifies forwarding, gleaning, and recovery when a neighbor is removed and re-added."""
@@ -555,7 +548,6 @@ class TestRemoveAddNeighbor:
         route_ip = ipv4_addr + "/32"
         neighbor_key = npu._neighbor_entry_key(rif_oid, ipv4_addr)
         npu.create(neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", mac_addr])
-        neighbor_present = True
         npu.create_route(route_ip, vrf_oid, rif_oid)
 
         try:
@@ -575,9 +567,7 @@ class TestRemoveAddNeighbor:
                 send_packet(dataplane, dev_port10, pkt)
                 verify_packet_any_port(dataplane, exp_pkt, lag_dev_ports)
 
-                npu.remove(neighbor_key)
-                neighbor_present = False
-
+                npu.remove(neighbor_key, False)
                 cpu_queue = topo._cpu_queue(0)
                 pre_stats = topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
                 send_packet(dataplane, dev_port10, pkt)
@@ -589,48 +579,15 @@ class TestRemoveAddNeighbor:
                 )
 
                 npu.create(neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", mac_addr])
-                neighbor_present = True
-
                 send_packet(dataplane, dev_port10, pkt)
                 verify_packet_any_port(dataplane, exp_pkt, lag_dev_ports)
         finally:
             npu.remove_route(route_ip, vrf_oid)
-            if neighbor_present:
-                npu.remove(neighbor_key)
+            npu.remove(neighbor_key, False)
 
 
 class TestRouteNeighborCollision:
     """Verifies forwarding and CPU gleaning for RIF routes with and without a neighbor."""
-    def _verify_forwarding(self, dataplane, pkt, exp_pkt):
-        send_packet(dataplane, self.dev_port11, pkt)
-        verify_packets(dataplane, exp_pkt, [self.dev_port10])
-
-    def _verify_cpu_glean(self, dataplane, pkt, cpu_queue):
-        pre_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
-        send_packet(dataplane, self.dev_port11, pkt)
-        time.sleep(4)
-        post_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
-        assert post_stats == pre_stats + 1, (
-            "CPU queue packet counter did not increment for neighbor glean: "
-            f"pre={pre_stats}, post={post_stats}"
-        )
-
-    def _create_route(self, npu):
-        npu.create_route(self.route_ip, self.vrf_oid, self.rif_oid)
-        self.route_present = True
-
-    def _remove_route(self, npu):
-        npu.remove_route(self.route_ip, self.vrf_oid)
-        self.route_present = False
-
-    def _create_neighbor(self, npu):
-        npu.create(self.neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dst_mac])
-        self.neighbor_present = True
-
-    def _remove_neighbor(self, npu):
-        npu.remove(self.neighbor_key)
-        self.neighbor_present = False
-
     def test_route_neighbor_collision(self, npu, dataplane, topology):
         self.topo = topology
         self.router_mac = npu.get(npu.switch_oid, ["SAI_SWITCH_ATTR_SRC_MAC_ADDRESS"]).value()
@@ -643,10 +600,9 @@ class TestRouteNeighborCollision:
         self.vrf_oid = self.topo.default_vrf
         self.rif_oid = self.topo.port10_rif
         self.neighbor_key = npu._neighbor_entry_key(self.rif_oid, self.ip_addr)
-
+        route_key = npu._route_entry_key(self.vrf_oid, self.route_ip)
+        
         npu.create(self.neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dst_mac])
-        self.neighbor_present = True
-        self.route_present = False
         nhop = npu.create(
             SaiObjType.NEXT_HOP,
             [
@@ -676,44 +632,60 @@ class TestRouteNeighborCollision:
                 )
                 cpu_queue = self.topo._cpu_queue(0)
 
-                self._verify_forwarding(dataplane, pkt, exp_pkt)
+                send_packet(dataplane, self.dev_port11, pkt)
+                verify_packets(dataplane, exp_pkt, [self.dev_port10])
 
-                self._create_route(npu)
-                self._verify_forwarding(dataplane, pkt, exp_pkt)
+                npu.create_route(self.route_ip, self.vrf_oid, self.rif_oid)
+                send_packet(dataplane, self.dev_port11, pkt)
+                verify_packets(dataplane, exp_pkt, [self.dev_port10])
 
-                self._remove_route(npu)
-                self._verify_forwarding(dataplane, pkt, exp_pkt)
+                npu.remove_route(self.route_ip, self.vrf_oid)
+                send_packet(dataplane, self.dev_port11, pkt)
+                verify_packets(dataplane, exp_pkt, [self.dev_port10])
 
-                self._create_route(npu)
-                self._verify_forwarding(dataplane, pkt, exp_pkt)
+                npu.create_route(self.route_ip, self.vrf_oid, self.rif_oid)
+                send_packet(dataplane, self.dev_port11, pkt)
+                verify_packets(dataplane, exp_pkt, [self.dev_port10])
 
-                self._remove_neighbor(npu)
-                self._verify_cpu_glean(dataplane, pkt, cpu_queue)
+                npu.remove(self.neighbor_key)
+                pre_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
+                send_packet(dataplane, self.dev_port11, pkt)
+                time.sleep(4)
+                post_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
+                assert post_stats == pre_stats + 1, (
+                    "CPU queue packet counter did not increment after neighbor removal: "
+                    f"pre={pre_stats}, post={post_stats}"
+                )
 
-                self._create_neighbor(npu)
-                self._verify_forwarding(dataplane, pkt, exp_pkt)
+                npu.create(self.neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dst_mac])
+                send_packet(dataplane, self.dev_port11, pkt)
+                verify_packets(dataplane, exp_pkt, [self.dev_port10])
 
-                self._remove_route(npu)
-                self._remove_neighbor(npu)
+                npu.remove_route(self.route_ip, self.vrf_oid)
+                npu.remove(self.neighbor_key)
                 send_packet(dataplane, self.dev_port11, pkt)
                 verify_no_other_packets(dataplane)
 
-                self._create_route(npu)
-                self._verify_cpu_glean(dataplane, pkt, cpu_queue)
+                npu.create_route(self.route_ip, self.vrf_oid, self.rif_oid)
+                pre_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
+                send_packet(dataplane, self.dev_port11, pkt)
+                time.sleep(4)
+                post_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
+                assert post_stats == pre_stats + 1
 
-                self._create_neighbor(npu)
-                self._verify_forwarding(dataplane, pkt, exp_pkt)
+                npu.create(self.neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dst_mac])
+                send_packet(dataplane, self.dev_port11, pkt)
+                verify_packets(dataplane, exp_pkt, [self.dev_port10])
         finally:
-            if self.route_present:
-                npu.remove_route(self.route_ip, self.vrf_oid)
+            npu.remove(route_key, False)
             npu.remove(nhop, False)
-            if self.neighbor_present:
-                npu.remove(self.neighbor_key)
+            npu.remove(self.neighbor_key, False)
 
 
 class L3DirBcastRouteTestHelper:
     """Shared topology and traffic checks for directed-broadcast route tests."""
-    def _setup(self, request, npu, topology):
+    @pytest.fixture(autouse=True)
+    def setup_class(self, request, npu, topology):
         topo = topology
         if len(npu.port_oids) <= 25:
             pytest.skip("Directed-broadcast tests require physical port indices 24–25")
@@ -772,7 +744,10 @@ class L3DirBcastRouteTestHelper:
                 "SAI_ROUTER_INTERFACE_ATTR_VLAN_ID", request.cls.vlan100,
             ],
         )
-    def _teardown(self, request, npu):
+
+    @pytest.fixture(scope="class", autouse=True)
+    def teardown_class(self, request, npu):
+        yield
         npu.remove(request.cls.vlan100_rif)
         npu.remove_fdb(request.cls.vlan100, request.cls.dmac1)
         npu.set(request.cls.port24_oid, ["SAI_PORT_ATTR_PORT_VLAN_ID", "0"])
@@ -898,130 +873,90 @@ class L3DirBcastRouteTestHelper:
 
 class TestDirBcastGleanAndForward(L3DirBcastRouteTestHelper):
     """Verifies CPU gleaning before neighbor resolution and forwarding afterward."""
-    def test_directed_broadcast_glean_and_forward(self, request, npu, dataplane, topology):
-        self._setup(request, npu, topology)
-        route1_created = False
-        route2_created = False
-        neighbor0 = None
-        neighbor1 = None
-        neighbor2 = None
-        nhop1 = None
-        nhop2 = None
-
+    def test_directed_broadcast_glean_and_forward(self, npu, dataplane):
         try:
+            npu.create_route(self.ip_addr1_subnet, self.vrf_oid, self.vlan100_rif)
+            npu.create_route(self.ip_addr2_subnet, self.vrf_oid, self.port10_rif)
             if npu.run_traffic:
-                npu.create_route(self.ip_addr1_subnet, self.vrf_oid, self.vlan100_rif)
-                route1_created = True
-                npu.create_route(self.ip_addr2_subnet, self.vrf_oid, self.port10_rif)
-                route2_created = True
-
                 self.traffic_trap_test1(dataplane)
                 self.traffic_trap_test2(dataplane)
 
-                neighbor0 = npu._neighbor_entry_key(self.vlan100_rif, self.dir_bcast_ip_addr1)
-                npu.create(neighbor0, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dir_bcast_dmac1])
+            neighbor0 = npu._neighbor_entry_key(self.vlan100_rif, self.dir_bcast_ip_addr1)
+            npu.create(neighbor0, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dir_bcast_dmac1])
 
-                neighbor1 = npu._neighbor_entry_key(self.vlan100_rif, self.ip_addr1)
-                npu.create(neighbor1, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac1])
-                nhop1 = npu.create(
-                    SaiObjType.NEXT_HOP,
-                    [
-                        "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
-                        "SAI_NEXT_HOP_ATTR_IP", self.ip_addr1,
-                        "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.vlan100_rif,
-                    ],
-                )
+            neighbor1 = npu._neighbor_entry_key(self.vlan100_rif, self.ip_addr1)
+            npu.create(neighbor1, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac1])
+            nhop1 = npu.create(
+                SaiObjType.NEXT_HOP,
+                [
+                    "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
+                    "SAI_NEXT_HOP_ATTR_IP", self.ip_addr1,
+                    "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.vlan100_rif,
+                ],
+            )
 
-                neighbor2 = npu._neighbor_entry_key(self.port10_rif, self.ip_addr2)
-                npu.create(neighbor2, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac2])
-                nhop2 = npu.create(
-                    SaiObjType.NEXT_HOP,
-                    [
-                        "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
-                        "SAI_NEXT_HOP_ATTR_IP", self.ip_addr2,
-                        "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.port10_rif,
-                    ],
-                )
-
+            neighbor2 = npu._neighbor_entry_key(self.port10_rif, self.ip_addr2)
+            npu.create(neighbor2, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac2])
+            nhop2 = npu.create(
+                SaiObjType.NEXT_HOP,
+                [
+                    "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
+                    "SAI_NEXT_HOP_ATTR_IP", self.ip_addr2,
+                    "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.port10_rif,
+                ],
+            )
+            if npu.run_traffic:
                 self.traffic_test(dataplane)
                 self.traffic_trap_test2(dataplane)
         finally:
-            if route1_created:
-                npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
-            if route2_created:
-                npu.remove_route(self.ip_addr2_subnet, self.vrf_oid)
-            if nhop1 is not None:
-                npu.remove(nhop1, False)
-            if nhop2 is not None:
-                npu.remove(nhop2, False)
-            if neighbor1 is not None:
-                npu.remove(neighbor1, False)
-            if neighbor2 is not None:
-                npu.remove(neighbor2, False)
-            if neighbor0 is not None:
-                npu.remove(neighbor0, False)
-            self._teardown(request, npu)
+            npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
+            npu.remove_route(self.ip_addr2_subnet, self.vrf_oid)
+            npu.remove(nhop1, False)
+            npu.remove(nhop2, False)
+            npu.remove(neighbor1, False)
+            npu.remove(neighbor2, False)
+            npu.remove(neighbor0, False)
 
 
 class TestDirBcastForward(L3DirBcastRouteTestHelper):
     """Verifies directed-broadcast and unicast forwarding with full neighbor/nhop config."""
-    def test_directed_broadcast_forward(self, request, npu, dataplane, topology):
-        self._setup(request, npu, topology)
-        route1_created = False
-        route2_created = False
-        neighbor0 = None
-        neighbor1 = None
-        neighbor2 = None
-        nhop1 = None
-        nhop2 = None
-
+    def test_directed_broadcast_forward(self, npu, dataplane):
         try:
+            neighbor1 = npu._neighbor_entry_key(self.vlan100_rif, self.ip_addr1)
+            npu.create(neighbor1, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac1])
+            nhop1 = npu.create(
+                SaiObjType.NEXT_HOP,
+                [
+                    "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
+                    "SAI_NEXT_HOP_ATTR_IP", self.ip_addr1,
+                    "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.vlan100_rif,
+                ],
+            )
+
+            neighbor2 = npu._neighbor_entry_key(self.port10_rif, self.ip_addr2)
+            npu.create(neighbor2, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac2])
+            nhop2 = npu.create(
+                SaiObjType.NEXT_HOP,
+                [
+                    "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
+                    "SAI_NEXT_HOP_ATTR_IP", self.ip_addr2,
+                    "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.port10_rif,
+                ],
+            )
+
+            neighbor0 = npu._neighbor_entry_key(self.vlan100_rif, self.dir_bcast_ip_addr1)
+            npu.create(neighbor0, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dir_bcast_dmac1])
+            npu.create_route(self.ip_addr1_subnet, self.vrf_oid, self.vlan100_rif)
+            npu.create_route(self.ip_addr2_subnet, self.vrf_oid, self.port10_rif)
             if npu.run_traffic:
-                neighbor1 = npu._neighbor_entry_key(self.vlan100_rif, self.ip_addr1)
-                npu.create(neighbor1, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac1])
-                nhop1 = npu.create(
-                    SaiObjType.NEXT_HOP,
-                    [
-                        "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
-                        "SAI_NEXT_HOP_ATTR_IP", self.ip_addr1,
-                        "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.vlan100_rif,
-                    ],
-                )
-
-                neighbor2 = npu._neighbor_entry_key(self.port10_rif, self.ip_addr2)
-                npu.create(neighbor2, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dmac2])
-                nhop2 = npu.create(
-                    SaiObjType.NEXT_HOP,
-                    [
-                        "SAI_NEXT_HOP_ATTR_TYPE", "SAI_NEXT_HOP_TYPE_IP",
-                        "SAI_NEXT_HOP_ATTR_IP", self.ip_addr2,
-                        "SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID", self.port10_rif,
-                    ],
-                )
-
-                neighbor0 = npu._neighbor_entry_key(self.vlan100_rif, self.dir_bcast_ip_addr1)
-                npu.create(neighbor0, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dir_bcast_dmac1])
-                npu.create_route(self.ip_addr1_subnet, self.vrf_oid, self.vlan100_rif)
-                route1_created = True
-                npu.create_route(self.ip_addr2_subnet, self.vrf_oid, self.port10_rif)
-                route2_created = True
-
                 self.traffic_test(dataplane)
                 self.traffic_trap_test2(dataplane)
         finally:
-            if route1_created:
-                npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
-            if route2_created:
-                npu.remove_route(self.ip_addr2_subnet, self.vrf_oid)
-            if nhop1 is not None:
-                npu.remove(nhop1, False)
-            if nhop2 is not None:
-                npu.remove(nhop2, False)
-            if neighbor1 is not None:
-                npu.remove(neighbor1, False)
-            if neighbor2 is not None:
-                npu.remove(neighbor2, False)
-            if neighbor0 is not None:
-                npu.remove(neighbor0, False)
-            self._teardown(request, npu)
+            npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
+            npu.remove_route(self.ip_addr2_subnet, self.vrf_oid)
+            npu.remove(nhop1, False)
+            npu.remove(nhop2, False)
+            npu.remove(neighbor1, False)
+            npu.remove(neighbor2, False)
+            npu.remove(neighbor0, False)
 
