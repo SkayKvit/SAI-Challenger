@@ -421,6 +421,10 @@ class SaiPtfTopologyMixin:
         queues = self.npu.get_list(cpu_port, "SAI_PORT_ATTR_QOS_QUEUE_LIST", "oid:0x0")
         return queues[idx]
 
+    def get_counter(self, oid, counter_name):
+        """Retrieves the counter value for a given SAI queue statistic."""
+        return self.npu.get_stats(oid, [counter_name, ""]).counters()[counter_name]
+
 
 class SaiPtfTopologyFixture(SaiPtfTopologyMixin):
     """Thin subclass used by the topology context manager."""
