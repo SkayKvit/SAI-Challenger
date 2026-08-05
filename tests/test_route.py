@@ -102,9 +102,6 @@ class TestDropRoute:
     """
     Verify drop route.
     """
-    def _queue_stat(self, npu, queue_oid):
-        return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
-
     def test_drop_route(self, npu, dataplane, topology):
         """
         Description:
@@ -145,7 +142,7 @@ class TestDropRoute:
                 )
 
                 cpu_queue = topo._cpu_queue(0)
-                pre_stats = self._queue_stat(npu, cpu_queue)
+                pre_stats = topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
 
                 status, action = npu.get(route_key, ["SAI_ROUTE_ENTRY_ATTR_PACKET_ACTION", ""], False)
                 assert status == "SAI_STATUS_SUCCESS"
@@ -155,7 +152,7 @@ class TestDropRoute:
                 verify_no_other_packets(dataplane)
                 time.sleep(4)
 
-                post_stats = self._queue_stat(npu, cpu_queue)
+                post_stats = topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
                 assert post_stats == pre_stats + 1, (
                     "CPU queue0 packet counters did not increment for route trap: "
                     f"pre={pre_stats}, post={post_stats}"
@@ -258,10 +255,10 @@ class TestRouteUpdate:
 
                 npu.set(route_key, ["SAI_ROUTE_ENTRY_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_TRAP"])
                 cpu_queue = topo._cpu_queue(0)
-                pre_stats = npu.get_stats(cpu_queue, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
+                pre_stats = topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
                 send_packet(dataplane, dev_port11, pkt)
                 time.sleep(4)
-                post_stats = npu.get_stats(cpu_queue, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
+                post_stats = topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
                 assert post_stats == pre_stats + 1
 
                 npu.set(route_key, ["SAI_ROUTE_ENTRY_ATTR_PACKET_ACTION", "SAI_PACKET_ACTION_FORWARD"])
@@ -483,11 +480,6 @@ class TestSviNeighbor:
 
 class TestCpuForward:
     """Verifies route forwarding to the CPU with an IP2ME hostif trap."""
-
-    @staticmethod
-    def _queue_stat(npu, queue_oid):
-        return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
-
     def test_cpu_forward(self, npu, dataplane, topology):
         topo = topology
         router_mac = npu.get(npu.switch_oid, ["SAI_SWITCH_ATTR_SRC_MAC_ADDRESS"]).value()
@@ -531,12 +523,12 @@ class TestCpuForward:
                 )
 
                 cpu_queue4 = topo._cpu_queue(4)
-                pre_stats = self._queue_stat(npu, cpu_queue4)
+                pre_stats = topo.get_counter(cpu_queue4, "SAI_QUEUE_STAT_PACKETS")
 
                 send_packet(dataplane, dev_port10, pkt)
                 time.sleep(4)
 
-                post_stats = self._queue_stat(npu, cpu_queue4)
+                post_stats = topo.get_counter(cpu_queue4, "SAI_QUEUE_STAT_PACKETS")
                 assert post_stats == pre_stats + 1, (
                     "CPU queue4 packet counter did not increment for IP2ME trap: "
                     f"pre={pre_stats}, post={post_stats}"
@@ -551,11 +543,6 @@ class TestCpuForward:
 
 class TestRemoveAddNeighbor:
     """Verifies forwarding, gleaning, and recovery when a neighbor is removed and re-added."""
-
-    @staticmethod
-    def _queue_stat(npu, queue_oid):
-        return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
-
     def test_remove_add_neighbor(self, npu, dataplane, topology):
         topo = topology
         router_mac = npu.get(npu.switch_oid, ["SAI_SWITCH_ATTR_SRC_MAC_ADDRESS"]).value()
@@ -592,10 +579,10 @@ class TestRemoveAddNeighbor:
                 neighbor_present = False
 
                 cpu_queue = topo._cpu_queue(0)
-                pre_stats = self._queue_stat(npu, cpu_queue)
+                pre_stats = topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
                 send_packet(dataplane, dev_port10, pkt)
                 verify_no_other_packets(dataplane)
-                post_stats = self._queue_stat(npu, cpu_queue)
+                post_stats = topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
                 assert post_stats == pre_stats + 1, (
                     "CPU queue packet counter did not increment after neighbor removal: "
                     f"pre={pre_stats}, post={post_stats}"
@@ -614,19 +601,15 @@ class TestRemoveAddNeighbor:
 
 class TestRouteNeighborCollision:
     """Verifies forwarding and CPU gleaning for RIF routes with and without a neighbor."""
-    @staticmethod
-    def _queue_stat(npu, queue_oid):
-        return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
-
     def _verify_forwarding(self, dataplane, pkt, exp_pkt):
         send_packet(dataplane, self.dev_port11, pkt)
         verify_packets(dataplane, exp_pkt, [self.dev_port10])
 
-    def _verify_cpu_glean(self, npu, dataplane, pkt, cpu_queue):
-        pre_stats = self._queue_stat(npu, cpu_queue)
+    def _verify_cpu_glean(self, dataplane, pkt, cpu_queue):
+        pre_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
         send_packet(dataplane, self.dev_port11, pkt)
         time.sleep(4)
-        post_stats = self._queue_stat(npu, cpu_queue)
+        post_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
         assert post_stats == pre_stats + 1, (
             "CPU queue packet counter did not increment for neighbor glean: "
             f"pre={pre_stats}, post={post_stats}"
@@ -649,7 +632,7 @@ class TestRouteNeighborCollision:
         self.neighbor_present = False
 
     def test_route_neighbor_collision(self, npu, dataplane, topology):
-        topo = topology
+        self.topo = topology
         self.router_mac = npu.get(npu.switch_oid, ["SAI_SWITCH_ATTR_SRC_MAC_ADDRESS"]).value()
         self.src_mac = "00:22:22:22:22:22"
         self.dst_mac = "00:11:22:33:44:55"
@@ -657,8 +640,8 @@ class TestRouteNeighborCollision:
         self.dev_port11 = 11
         self.ip_addr = "10.10.10.1"
         self.route_ip = self.ip_addr + "/32"
-        self.vrf_oid = topo.default_vrf
-        self.rif_oid = topo.port10_rif
+        self.vrf_oid = self.topo.default_vrf
+        self.rif_oid = self.topo.port10_rif
         self.neighbor_key = npu._neighbor_entry_key(self.rif_oid, self.ip_addr)
 
         npu.create(self.neighbor_key, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dst_mac])
@@ -691,7 +674,7 @@ class TestRouteNeighborCollision:
                     ip_id=105,
                     ip_ttl=63,
                 )
-                cpu_queue = topo._cpu_queue(0)
+                cpu_queue = self.topo._cpu_queue(0)
 
                 self._verify_forwarding(dataplane, pkt, exp_pkt)
 
@@ -705,7 +688,7 @@ class TestRouteNeighborCollision:
                 self._verify_forwarding(dataplane, pkt, exp_pkt)
 
                 self._remove_neighbor(npu)
-                self._verify_cpu_glean(npu, dataplane, pkt, cpu_queue)
+                self._verify_cpu_glean(dataplane, pkt, cpu_queue)
 
                 self._create_neighbor(npu)
                 self._verify_forwarding(dataplane, pkt, exp_pkt)
@@ -716,7 +699,7 @@ class TestRouteNeighborCollision:
                 verify_no_other_packets(dataplane)
 
                 self._create_route(npu)
-                self._verify_cpu_glean(npu, dataplane, pkt, cpu_queue)
+                self._verify_cpu_glean(dataplane, pkt, cpu_queue)
 
                 self._create_neighbor(npu)
                 self._verify_forwarding(dataplane, pkt, exp_pkt)
@@ -807,12 +790,8 @@ class L3DirBcastRouteTestHelper:
         npu.remove(request.cls.vlan100)
         npu.remove(request.cls.port25_bp)
         npu.remove(request.cls.port24_bp)
-        
-    @staticmethod
-    def _queue_stat(npu, queue_oid):
-        return npu.get_stats(queue_oid, ["SAI_QUEUE_STAT_PACKETS", ""]).counters()["SAI_QUEUE_STAT_PACKETS"]
 
-    def _verify_cpu_glean(self, npu, dataplane, ingress_port, ip_dst, eth_src):
+    def _verify_cpu_glean(self, dataplane, ingress_port, ip_dst, eth_src):
         pkt = simple_tcp_packet(
             eth_dst=self.router_mac,
             eth_src=eth_src,
@@ -822,43 +801,39 @@ class L3DirBcastRouteTestHelper:
             ip_ttl=64,
         )
         cpu_queue = self.topo._cpu_queue(0)
-        pre_stats = self._queue_stat(npu, cpu_queue)
+        pre_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
         send_packet(dataplane, ingress_port, pkt)
         time.sleep(4)
-        post_stats = self._queue_stat(npu, cpu_queue)
+        post_stats = self.topo.get_counter(cpu_queue, "SAI_QUEUE_STAT_PACKETS")
         assert post_stats == pre_stats + 1, (
             "CPU queue packet counter did not increment for directed-route glean: "
             f"pre={pre_stats}, post={post_stats}"
         )
 
-    def traffic_trap_test1(self, npu, dataplane):
+    def traffic_trap_test1(self, dataplane):
         """Verify CPU gleaning for route destinations without neighbors."""
         self._verify_cpu_glean(
-            npu,
             dataplane,
             self.dev_port10,
             self.ip_addr1,
             "00:22:22:22:22:21",
         )
         self._verify_cpu_glean(
-            npu,
             dataplane,
             self.dev_port24,
             self.ip_addr2,
             "00:22:22:22:22:22",
         )
 
-    def traffic_trap_test2(self, npu, dataplane):
+    def traffic_trap_test2(self,  dataplane):
         """Verify CPU gleaning for unresolved hosts within routed subnets."""
         self._verify_cpu_glean(
-            npu,
             dataplane,
             self.dev_port10,
             "10.10.10.2",
             "00:22:22:22:22:21",
         )
         self._verify_cpu_glean(
-            npu,
             dataplane,
             self.dev_port24,
             "20.20.20.2",
@@ -948,8 +923,8 @@ class TestDirBcastGleanAndForward(L3DirBcastRouteTestHelper):
                 npu.create_route(self.ip_addr2_subnet, self.vrf_oid, self.port10_rif)
                 route2_created = True
 
-                self.traffic_trap_test1(npu, dataplane)
-                self.traffic_trap_test2(npu, dataplane)
+                self.traffic_trap_test1(dataplane)
+                self.traffic_trap_test2(dataplane)
 
                 neighbor0 = npu._neighbor_entry_key(self.vlan100_rif, self.dir_bcast_ip_addr1)
                 npu.create(neighbor0, ["SAI_NEIGHBOR_ENTRY_ATTR_DST_MAC_ADDRESS", self.dir_bcast_dmac1])
@@ -977,7 +952,7 @@ class TestDirBcastGleanAndForward(L3DirBcastRouteTestHelper):
                 )
 
                 self.traffic_test(dataplane)
-                self.traffic_trap_test2(npu, dataplane)
+                self.traffic_trap_test2(dataplane)
         finally:
             if route1_created:
                 npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
@@ -1040,7 +1015,7 @@ class TestDirBcastForward(L3DirBcastRouteTestHelper):
                 route2_created = True
 
                 self.traffic_test(dataplane)
-                self.traffic_trap_test2(npu, dataplane)
+                self.traffic_trap_test2(dataplane)
         finally:
             if route1_created:
                 npu.remove_route(self.ip_addr1_subnet, self.vrf_oid)
