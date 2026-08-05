@@ -716,9 +716,7 @@ class L3DirBcastRouteTestHelper:
     def _setup(self, request, npu, topology):
         topo = topology
         if len(npu.port_oids) <= 25:
-            pytest.skip(
-                "Directed-broadcast tests require physical port indices 24–25"
-            )
+            pytest.skip("Directed-broadcast tests require physical port indices 24–25")
 
         request.cls.topo = topo
         request.cls.router_mac = npu.get(npu.switch_oid, ["SAI_SWITCH_ATTR_SRC_MAC_ADDRESS"]).value()
@@ -741,23 +739,17 @@ class L3DirBcastRouteTestHelper:
         request.cls.port24_bp = npu.create(
             SaiObjType.BRIDGE_PORT,
             [
-                "SAI_BRIDGE_PORT_ATTR_TYPE",
-                "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID",
-                request.cls.port24_oid,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE",
-                "true",
+                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                "SAI_BRIDGE_PORT_ATTR_PORT_ID", request.cls.port24_oid,
+                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
             ],
         )
         request.cls.port25_bp = npu.create(
             SaiObjType.BRIDGE_PORT,
             [
-                "SAI_BRIDGE_PORT_ATTR_TYPE",
-                "SAI_BRIDGE_PORT_TYPE_PORT",
-                "SAI_BRIDGE_PORT_ATTR_PORT_ID",
-                request.cls.port25_oid,
-                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE",
-                "true",
+                "SAI_BRIDGE_PORT_ATTR_TYPE", "SAI_BRIDGE_PORT_TYPE_PORT",
+                "SAI_BRIDGE_PORT_ATTR_PORT_ID", request.cls.port25_oid,
+                "SAI_BRIDGE_PORT_ATTR_ADMIN_STATE", "true",
             ],
         )
         request.cls.vlan100 = npu.create(SaiObjType.VLAN,["SAI_VLAN_ATTR_VLAN_ID", "100"])
