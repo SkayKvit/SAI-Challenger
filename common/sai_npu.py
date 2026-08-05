@@ -332,8 +332,8 @@ class SaiNpu(Sai):
     def _neighbor_entry_key(npu, rif_oid, ip):
         return "SAI_OBJECT_TYPE_NEIGHBOR_ENTRY:" + json.dumps(
             {
-                "ip": ip,
-                "rif": rif_oid,
+                "ip_address": ip,
+                "rif_id": rif_oid,
                 "switch_id": npu.switch_oid,
             }
         )
