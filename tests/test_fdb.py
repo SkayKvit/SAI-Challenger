@@ -1,4 +1,3 @@
-import json
 import time
 
 import pytest
@@ -36,17 +35,6 @@ def on_prev_test_failure(prev_test_failed, npu):
         npu.reset()
         npu._topo_initialized = False
         npu._topo.setup()
-
-
-def _fdb_entry_key(npu, vlan_oid, mac):
-    return "SAI_OBJECT_TYPE_FDB_ENTRY:" + json.dumps(
-        {
-            "bvid": vlan_oid,
-            "mac": mac,
-            "switch_id": npu.switch_oid,
-        }
-    )
-
 
 def _sai_wait_fdb_age(timeout_sec):
     """Match sai_base_test.SaiHelper.saiWaitFdbAge (sleep timeout + 10s buffer)."""
@@ -225,7 +213,7 @@ class TestFdbAttribute:
         3. Set SAI_FDB_ENTRY_ATTR_PACKET_ACTION to SAI_PACKET_ACTION_FORWARD
         4. Get SAI_FDB_ENTRY_ATTR_PACKET_ACTION and verify it is SAI_PACKET_ACTION_FORWARD
         """
-        fdb_key = _fdb_entry_key(npu, self.vlan_oid, self.mac)
+        fdb_key = npu._fdb_entry_key(self.vlan_oid, self.mac)
 
         status, data = npu.get(fdb_key, ["SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID", "oid:0x0"], False)
         assert status == "SAI_STATUS_SUCCESS"
@@ -1084,7 +1072,7 @@ class TestFdbMacMove:
         """
         if not npu.run_traffic:
             pytest.skip("Traffic generation disabled")
-        moving_key = _fdb_entry_key(npu, self.vlan_oid, self.moving_mac)
+        moving_key = npu._fdb_entry_key(self.vlan_oid, self.moving_mac)
         pkt = simple_udp_packet(eth_dst=self.chck_mac, eth_src=self.moving_mac)
         chck_pkt = simple_udp_packet(eth_dst=self.moving_mac, eth_src=self.chck_mac)
         port_chain = [self.dev_port0, self.dev_port1, self.dev_port5, self.dev_port27, self.dev_port1]
@@ -1124,7 +1112,7 @@ class TestFdbMacMove:
         """
         if not npu.run_traffic:
             pytest.skip("Traffic generation disabled")
-        fdb_key = _fdb_entry_key(npu, self.vlan_oid, self.moving_mac)
+        fdb_key = npu._fdb_entry_key(npu, self.vlan_oid, self.moving_mac)
         port_chain = [self.dev_port0, self.dev_port1, self.dev_port5, self.dev_port27, self.dev_port1]
         bport_chain = [self.port0_bp, self.port1_bp, self.lag1_bp, self.lag10_bp, self.port1_bp]
         chck_pkt = simple_udp_packet(eth_dst=self.moving_mac, eth_src=self.chck_mac)
@@ -3091,7 +3079,7 @@ class TestFdbEvent:
             send_packet(dataplane, 0, pkt)
             verify_each_packet_on_multiple_port_lists(dataplane, [tag_pkt, pkt], [[1], [4, 5, 6]])
             time.sleep(2)
-            fdb_key = _fdb_entry_key(npu, self.vlan_oid, self.src_mac)
+            fdb_key = npu._fdb_entry_key(self.vlan_oid, self.src_mac)
             status, data = npu.get(fdb_key, ["SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID", "oid:0x0"], False)
             assert status == "SAI_STATUS_SUCCESS"
             assert data.oid() == self.port0_bp
@@ -3126,7 +3114,7 @@ class TestFdbEvent:
             send_packet(dataplane, 0, pkt)
             verify_each_packet_on_multiple_port_lists(dataplane, [tag_pkt, pkt], [[1], [4, 5, 6]])
             time.sleep(2)
-            fdb_key = _fdb_entry_key(npu, self.vlan_oid, self.src_mac)
+            fdb_key = npu._fdb_entry_key(self.vlan_oid, self.src_mac)
             status, data = npu.get(fdb_key, ["SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID", "oid:0x0"], False)
             assert status == "SAI_STATUS_SUCCESS"
             assert data.oid() == self.port0_bp
@@ -3165,7 +3153,7 @@ class TestFdbEvent:
             send_packet(dataplane, 0, pkt)
             verify_each_packet_on_multiple_port_lists(dataplane, [tag_pkt, pkt], [[1], [4, 5, 6]])
             time.sleep(2)
-            fdb_key = _fdb_entry_key(npu, self.vlan_oid, self.src_mac)
+            fdb_key = npu._fdb_entry_key(self.vlan_oid, self.src_mac)
             status, data = npu.get(fdb_key, ["SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID", "oid:0x0"], False)
             assert status == "SAI_STATUS_SUCCESS"
             assert data.oid() == self.port0_bp
@@ -3211,7 +3199,7 @@ class TestFdbEvent:
             send_packet(dataplane, 0, pkt)
             verify_each_packet_on_multiple_port_lists(dataplane, [tag_pkt, pkt], [[1], [4, 5, 6]])
             time.sleep(2)
-            fdb_key = _fdb_entry_key(npu, self.vlan_oid, self.src_mac)
+            fdb_key = npu._fdb_entry_key(self.vlan_oid, self.src_mac)
             status, data = npu.get(fdb_key, ["SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID", "oid:0x0"], False)
             assert status == "SAI_STATUS_SUCCESS"
             assert data.oid() == self.port0_bp
@@ -3254,7 +3242,7 @@ class TestFdbEvent:
             send_packet(dataplane, 0, pkt)
             verify_each_packet_on_multiple_port_lists(dataplane, [tag_pkt, pkt], [[1], [4, 5, 6]])
             time.sleep(2)
-            fdb_key = _fdb_entry_key(npu, self.vlan_oid, self.src_mac)
+            fdb_key = npu._fdb_entry_key(self.vlan_oid, self.src_mac)
             status, data = npu.get(fdb_key, ["SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID", "oid:0x0"], False)
             assert status == "SAI_STATUS_SUCCESS"
             assert data.oid() == self.port0_bp
