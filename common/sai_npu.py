@@ -147,7 +147,7 @@ class SaiNpu(Sai):
 
     def create_fdb(self, vlan_oid, mac, bp_oid, entry_type="SAI_FDB_ENTRY_TYPE_STATIC", action="SAI_PACKET_ACTION_FORWARD", do_assert=True):
         return self.create(
-                   self._fdb_entry_key(vlan_oid, mac),
+                   self.fdb_entry_key(vlan_oid, mac),
                    [
                        "SAI_FDB_ENTRY_ATTR_TYPE",           entry_type,
                        "SAI_FDB_ENTRY_ATTR_BRIDGE_PORT_ID", bp_oid,
@@ -156,7 +156,7 @@ class SaiNpu(Sai):
                    do_assert)
 
     def remove_fdb(self, vlan_oid, mac, do_assert=True):
-        return self.remove(self._fdb_entry_key(vlan_oid, mac), do_assert)
+        return self.remove(self.fdb_entry_key(vlan_oid, mac), do_assert)
 
     def create_vlan_member(self, vlan_oid, bp_oid, tagging_mode):
         oid = self.create(SaiObjType.VLAN_MEMBER,
@@ -326,7 +326,7 @@ class SaiNpu(Sai):
             }
         )
 
-    def _fdb_entry_key(self, vlan_oid, mac):
+    def fdb_entry_key(self, vlan_oid, mac):
         return "SAI_OBJECT_TYPE_FDB_ENTRY:" + json.dumps(
             {
                 "bvid": vlan_oid,
