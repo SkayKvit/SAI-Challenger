@@ -326,6 +326,17 @@ class SaiNpu(Sai):
             }
         )
 
+    def _ipmc_entry_key(self, vr_oid, src_ip, dst_ip, entry_type=0):
+        return "SAI_OBJECT_TYPE_IPMC_ENTRY:" + json.dumps(
+            {
+                "switch_id": self.switch_oid,
+                "vr_id": vr_oid,
+                "type": str(entry_type),
+                "destination": dst_ip,
+                "source": src_ip,
+            }
+        )
+
     def fdb_entry_key(self, vlan_oid, mac):
         return "SAI_OBJECT_TYPE_FDB_ENTRY:" + json.dumps(
             {
