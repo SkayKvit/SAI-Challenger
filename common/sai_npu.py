@@ -326,7 +326,7 @@ class SaiNpu(Sai):
             }
         )
 
-    def _ipmc_entry_key(self, vr_oid, src_ip, dst_ip, entry_type=0):
+    def ipmc_entry_key(self, vr_oid, src_ip, dst_ip, entry_type=0):
         return "SAI_OBJECT_TYPE_IPMC_ENTRY:" + json.dumps(
             {
                 "switch_id": self.switch_oid,
