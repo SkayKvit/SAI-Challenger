@@ -14,7 +14,7 @@ All modules use the shared `sai_ptf_topology`, support a single NPU per testbed,
 
 ## Shared topology
 
-The `[sai_ptf_topology](../../topologies/sai_ptf_topology.py)` fixture provides the common L2/L3 layout and aliases such as `topology.vlan10`, `topology.port10_rif`, and `topology.lag3_rif`.
+The [sai_ptf_topology](../../topologies/sai_ptf_topology.py) fixture provides the common L2/L3 layout and aliases such as `topology.vlan10`, `topology.port10_rif`, and `topology.lag3_rif`.
 
 
 | Ports | Configuration                           | Purpose                    |
@@ -37,9 +37,10 @@ The fixture installs default IPv4 and IPv6 drop routes, exposes CPU queue counte
 
 Before the first standalone SAIVS run, build the image and start the container:
 
-```sh
+```
 ./build.sh -a trident2 -t saivs
-./run.sh -a trident2 -t saivs ```
+./run.sh -a trident2 -t saivs
+```
 
 See the [standalone mode guide](../../docs/standalone_mode.md) for additional
 build options.
@@ -47,16 +48,16 @@ build options.
 Run all three modules:
 
 ```sh
-./exec.sh --no-tty pytest --testbed=saivs_standalone -s -v \
-  native/
+./exec.sh --no-tty pytest --testbed=saivs_standalone -s -v native/
 ```
 
 Run on the Marvell AC5X simulator with traffic enabled:
 
+See the [Marvell SAI simulator guide](../../../docs/test_mrvl_sai.md) for the
+complete setup, simulator CLI, and configuration details.
+
 ```sh
-./exec.sh --no-tty -s redis -a ac5x -t simulator \
-  pytest --testbed=sainpu_marvell_redis -s -v \
-  native/ --traffic
+./exec.sh --no-tty -s redis -a ac5x -t simulator pytest --testbed=sainpu_marvell_redis -s -v native/ --traffic
 ```
 
 ## Legacy references
