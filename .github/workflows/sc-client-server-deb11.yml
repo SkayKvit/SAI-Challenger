@@ -172,7 +172,7 @@ jobs:
     - name: Run functional test cases
       run: ./exec.sh --no-tty -i client pytest --testbed=saivs_client_server -v -k "test_l2_basic"
     - name: Run function tests converted from PTF format
-      run: ./exec.sh --no-tty -i client pytest --testbed=saivs_client_server -v test_fdb.py test_vlan.py test_route.py
+      run: ./exec.sh --no-tty -i client pytest --testbed=saivs_client_server -v native/
     - name: Run flex counters test cases
       run: ./exec.sh --no-tty -i client pytest --testbed=saivs_client_server -v -k "test_flex_counters"
     - name: Run warm reboot test cases
