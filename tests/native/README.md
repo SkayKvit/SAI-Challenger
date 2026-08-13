@@ -51,15 +51,6 @@ Run all three modules:
 ./exec.sh --no-tty pytest --testbed=saivs_standalone -s -v native/
 ```
 
-Run on the Marvell AC5X simulator with traffic enabled:
-
-See the [Marvell SAI simulator guide](../../../docs/test_mrvl_sai.md) for the
-complete setup, simulator CLI, and configuration details.
-
-```sh
-./exec.sh --no-tty -s redis -a ac5x -t simulator pytest --testbed=sainpu_marvell_redis -s -v native/ --traffic
-```
-
 ## Legacy references
 
 - `SAI/ptf/saifdb.py`
