@@ -345,3 +345,17 @@ class SaiNpu(Sai):
                 "switch_id": self.switch_oid,
             }
         )
+
+    def my_sid_entry_key(self, vr_oid, sid, locator_block_len=48, locator_node_len=16,
+                         function_len=0, args_len=0):
+        return "SAI_OBJECT_TYPE_MY_SID_ENTRY:" + json.dumps(
+            {
+                "switch_id": self.switch_oid,
+                "vr_id": vr_oid,
+                "locator_block_len": str(locator_block_len),
+                "locator_node_len": str(locator_node_len),
+                "function_len": str(function_len),
+                "args_len": str(args_len),
+                "sid": sid,
+            }
+        )
