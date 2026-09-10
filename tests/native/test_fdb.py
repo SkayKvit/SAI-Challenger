@@ -48,7 +48,7 @@ def on_prev_test_failure(prev_test_failed, npu):
     if prev_test_failed:
         npu.reset()
         npu._topo_initialized = False
-        npu._topo.setup(npu._topo.layout)
+        npu._topo.setup()
 
 def _sai_wait_fdb_age(timeout_sec):
     """Match sai_base_test.SaiHelper.saiWaitFdbAge (sleep timeout + 10s buffer)."""

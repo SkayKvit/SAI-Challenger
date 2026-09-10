@@ -113,9 +113,11 @@ class SaiPtfTopologyMixin:
 
     def __init__(self, npu: Any) -> None:
         self.npu = npu
+        self.layout = "l3_advanced"
 
-    def setup(self, layout="l3_advanced") -> None:
-        """Bring up topology for ``layout`` (default ``l3_advanced``)."""
+    def setup(self, layout=None) -> None:
+        if layout is None:
+            layout = self.layout
         if layout not in self.LAYOUTS:
             raise ValueError(f"topology layout must be one of {self.LAYOUTS}, got {layout}")
         self.layout = layout
