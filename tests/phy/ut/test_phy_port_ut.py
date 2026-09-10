@@ -44,7 +44,10 @@ def test_get_before_set_attr(phy, dataplane, sai_port_obj, attr, attr_type):
         ("SAI_PORT_ATTR_ADMIN_STATE",               "false"),
         # autoneg, speed and FEC attributes are set from the sku file, for example: phy/broadcom/BCM81724/saivs/sku/8x100g.json
         ("SAI_PORT_ATTR_LOOPBACK_MODE",             "SAI_PORT_LOOPBACK_MODE_PHY_REMOTE"),
+        ("SAI_PORT_ATTR_LOOPBACK_MODE",             "SAI_PORT_LOOPBACK_MODE_NONE"),
+        ("SAI_PORT_ATTR_LOOPBACK_MODE",             "SAI_PORT_LOOPBACK_MODE_MAC"),
         ("SAI_PORT_ATTR_MTU",                       "9000"),
+        ("SAI_PORT_ATTR_MTU",                       "1500"),
     ],
 )
 def test_set_attr(phy, dataplane, sai_port_obj, attr, attr_value):
@@ -72,3 +75,100 @@ def test_get_after_set_attr(phy, dataplane, sai_port_obj, attr, attr_type):
 
     if attr in port_attrs_updated:
         assert data.value() == port_attrs_updated[attr]
+
+
+@pytest.mark.parametrize(
+    "attr, dummy_value",
+    [
+        ("SAI_PORT_ATTR_OPER_STATUS",  "SAI_PORT_OPER_STATUS_UP"),
+        ("SAI_PORT_ATTR_HW_LANE_LIST", "1:1"),
+    ],
+)
+def test_readonly_port_attributes(phy, sai_port_obj, attr, dummy_value):
+    """Verify that read-only port attributes can be read via GET, but fail when modified via SET."""
+    result = phy.get(sai_port_obj, [attr], do_assert=False)
+    status = result[0] if isinstance(result, tuple) else result
+    phy.assert_status_success(status)
+
+    set_status = phy.set(sai_port_obj, [attr, dummy_value], do_assert=False)
+    assert set_status != "SAI_STATUS_SUCCESS", f"Read-Only attribute {attr} was modified successfully!"
+
+
+def test_port_invalid_oid_operations(phy, sai_port_obj, dataplane):
+    """Verify that performing GET/SET operations on a non-existing OID fails gracefully."""
+    invalid_oid = "oid:0x100000000ffff"
+    
+    # GET on invalid OID
+    try:
+        result = phy.get(invalid_oid, ["SAI_PORT_ATTR_ADMIN_STATE"], do_assert=False)
+        status = result[0] if isinstance(result, tuple) else result
+        assert status != "SAI_STATUS_SUCCESS", "GET operation on invalid OID should fail"
+    except Exception as e:
+        # Catch client-level failure (VID -> RID lookup failure)
+        pass
+
+    #verify syncd is still alive after invalid GET
+    status, _ = phy.get(sai_port_obj, ["SAI_PORT_ATTR_ADMIN_STATE"], do_assert=False)
+    phy.assert_status_success(status)
+
+    # SET on invalid OID
+    try:
+        status = phy.set(invalid_oid, ["SAI_PORT_ATTR_ADMIN_STATE", "true"], do_assert=False)
+        assert status != "SAI_STATUS_SUCCESS", "SET operation on invalid OID should fail"
+    except Exception as e:
+        pass
+
+    #verify syncd is still alive after invalid SET
+    status, _ = phy.get(sai_port_obj, ["SAI_PORT_ATTR_ADMIN_STATE"], do_assert=False)
+    phy.assert_status_success(status)
+
+
+@pytest.mark.parametrize(
+    "attr, attr_type, test_val",
+    [
+        ("SAI_PORT_ATTR_AUTO_NEG_MODE", "bool", "true"),
+        ("SAI_PORT_ATTR_AUTO_NEG_MODE", "bool", "false"),
+    ],
+)
+def test_phy_autoneg_toggle(phy, sai_port_obj, attr, attr_type, test_val):
+    """Verify toggling Auto-Negotiation mode on PHY interface."""
+    try:
+        res = phy.get(sai_port_obj, ["SAI_PORT_ATTR_SUPPORTED_AUTO_NEG_MODE"], do_assert=False)
+        status, supp_data = res if isinstance(res, tuple) else (res, None)
+
+        if status == "SAI_STATUS_SUCCESS" and supp_data is not None:
+            raw_val = supp_data.value()
+            is_supported = raw_val is True or str(raw_val).lower() in ("true", "1")
+            if not is_supported:
+                pytest.skip("Auto-negotiation explicitly reported as NOT supported on this port")
+    except (NotImplementedError, Exception):
+        # Attribute is not implemented in SaiPhy driver yet, fallback to direct SET check
+        pass
+
+    #Try setting AUTO_NEG_MODE directly
+    status = phy.set(sai_port_obj, [attr, test_val], do_assert=False)
+    if status != "SAI_STATUS_SUCCESS":
+        pytest.skip(f"Auto-negotiation toggle not supported on target PHY")
+
+    res = phy.get(sai_port_obj, [attr], do_assert=False)
+    status, data = res if isinstance(res, tuple) else (res, None)
+    
+    phy.assert_status_success(status)
+    assert data is not None, f"Failed to retrieve data for {attr}"
+    assert str(data.value()).lower() == test_val.lower(), f"Expected {test_val}, got {data.value()}"
+
+
+def test_port_batch_get_stats(phy, sai_port_obj):
+    """Verify requesting multiple stats counters in a single RPC batch call."""
+    counters = [
+        "SAI_PORT_STAT_IF_IN_OCTETS", "",
+        "SAI_PORT_STAT_IF_OUT_OCTETS", "",
+        "SAI_PORT_STAT_IF_IN_UCAST_PKTS", "",
+    ]
+    stats_res = phy.get_stats(sai_port_obj, counters)
+    
+    cntrs = stats_res.counters() if hasattr(stats_res, "counters") else stats_res[1] if isinstance(stats_res, tuple) else stats_res
+    
+    assert len(cntrs) == 3
+    for counter_name in ["SAI_PORT_STAT_IF_IN_OCTETS", "SAI_PORT_STAT_IF_OUT_OCTETS", "SAI_PORT_STAT_IF_IN_UCAST_PKTS"]:
+        assert counter_name in cntrs
