@@ -1,5 +1,7 @@
 import json
 import time
+import re
+import os
 
 from saichallenger.common.sai import Sai
 from saichallenger.common.sai_data import SaiData, SaiObjType
@@ -375,3 +377,93 @@ class SaiNpu(Sai):
                 "sid": sid,
             }
         )
+
+    def _platform_json_path(self):
+        base = f"{self.asic_dir}/{self.target}"
+        for name in (self.cfg.get("platform"), self.sku):
+            if name:
+                path = f"{base}/platform/{name}.json"
+                if os.path.isfile(path):
+                    return path
+        return f"{base}/platform.json"
+
+    def iter_breakout_ports(self, index=None):
+        """
+        Yield per-logical-port breakout entries from platform.json.
+        Each item: index, name, mode, alias, lanes, speed_mbps, supported_speeds_mbps.
+        """
+        brkout_pattern = re.compile(r"(\d{1,6})x(\d+(?:\.\d+)?G?)(\[([^\]]+)\])?(\((\d{1,6})\))?")
+        with open(self._platform_json_path()) as f:
+            platform = json.load(f)
+
+        interface_by_port_index = {}
+        for port_name, port in platform.get("interfaces", {}).items():
+            port_index = int(port["index"].split(",")[0])
+            interface_by_port_index[port_index] = (port_name, port)
+
+        if index is None:
+            port_indexes = interface_by_port_index.keys()
+        else:
+            port_indexes = [index] if isinstance(index, int) else index
+
+        for port_index in sorted(port_indexes):
+            if port_index not in interface_by_port_index:
+                raise ValueError(f"unknown port index {port_index}")
+            port_name, port = interface_by_port_index[port_index]
+            lane_list = port["lanes"].split(",")
+            index_list = port["index"].split(",")
+
+            for breakout_mode, logical_port_names in port["breakout_modes"].items():
+                segments = []
+                for part in breakout_mode.split("+"):
+                    match = brkout_pattern.match(part)
+                    if not match:
+                        raise ValueError(f"unsupported breakout mode segment: {part}")
+
+                    num_ports = int(match.group(1))
+                    default_speed = match.group(2).strip()
+                    default_speed_mbps = int(float(default_speed[:-1]) * 1000) if default_speed.endswith("G") else int(default_speed)
+                    supported_speeds_mbps = {default_speed_mbps}
+                    if match.group(4):
+                        for speed in match.group(4).split(","):
+                            speed = speed.strip()
+                            supported_speeds_mbps.add(int(float(speed[:-1]) * 1000) if speed.endswith("G") else int(speed))
+                    num_assigned_lanes = int(match.group(6)) if match.group(6) else len(lane_list)
+                    segments.append({
+                        "num_ports": num_ports,
+                        "num_assigned_lanes": num_assigned_lanes,
+                        "default_speed_mbps": default_speed_mbps,
+                        "supported_speeds_mbps": sorted(supported_speeds_mbps),
+                    })
+
+                lanes_used = sum(segment["num_assigned_lanes"] for segment in segments)
+                if lanes_used > len(lane_list):
+                    raise ValueError(
+                        f"{port_name} mode {breakout_mode}: assigned lanes {lanes_used} "
+                        f"exceed available {len(lane_list)}"
+                    )
+
+                num_logical_ports = sum(segment["num_ports"] for segment in segments)
+                if num_logical_ports != len(logical_port_names):
+                    raise ValueError(
+                        f"{port_name} mode {breakout_mode}: expected {len(logical_port_names)} "
+                        f"aliases, breakout defines {num_logical_ports}"
+                    )
+
+                lane_id = 0
+                alias_id = 0
+                for segment in segments:
+                    lanes_per_port = segment["num_assigned_lanes"] // segment["num_ports"]
+                    for _ in range(segment["num_ports"]):
+                        lane_end = lane_id + lanes_per_port
+                        yield {
+                            "index": int(index_list[lane_id]),
+                            "name": port_name,
+                            "mode": breakout_mode,
+                            "alias": logical_port_names[alias_id],
+                            "lanes": ",".join(lane_list[lane_id:lane_end]),
+                            "speed_mbps": segment["default_speed_mbps"],
+                            "supported_speeds_mbps": segment["supported_speeds_mbps"],
+                        }
+                        lane_id += lanes_per_port
+                        alias_id += 1
