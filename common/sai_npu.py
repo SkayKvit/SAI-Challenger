@@ -1,7 +1,7 @@
 import json
-import time
-import re
 import os
+import re
+import time
 
 from saichallenger.common.sai import Sai
 from saichallenger.common.sai_data import SaiData, SaiObjType
@@ -387,7 +387,7 @@ class SaiNpu(Sai):
                     return path
         return f"{base}/platform.json"
 
-    def iter_breakout_ports(self, index=None):
+    def iter_breakout_ports(self, index=None, mode=None):
         """
         Yield per-logical-port breakout entries from platform.json.
         Each item: index, name, mode, alias, lanes, speed_mbps, supported_speeds_mbps.
@@ -397,6 +397,7 @@ class SaiNpu(Sai):
             platform = json.load(f)
 
         interface_by_port_index = {}
+        # Build lookup table from all interfaces in platform.json
         for port_name, port in platform.get("interfaces", {}).items():
             port_index = int(port["index"].split(",")[0])
             interface_by_port_index[port_index] = (port_name, port)
@@ -406,6 +407,7 @@ class SaiNpu(Sai):
         else:
             port_indexes = [index] if isinstance(index, int) else index
 
+        # Process each requested physical port (e.g. EthernetX at index X)
         for port_index in sorted(port_indexes):
             if port_index not in interface_by_port_index:
                 raise ValueError(f"unknown port index {port_index}")
@@ -413,8 +415,12 @@ class SaiNpu(Sai):
             lane_list = port["lanes"].split(",")
             index_list = port["index"].split(",")
 
+            # Walk every breakout mode defined for this physical port
             for breakout_mode, logical_port_names in port["breakout_modes"].items():
+                if mode is not None and breakout_mode != mode:
+                    continue
                 segments = []
+                # Split compound modes like "1x200G(4)+4x50G(4)" into segments
                 for part in breakout_mode.split("+"):
                     match = brkout_pattern.match(part)
                     if not match:
@@ -425,6 +431,7 @@ class SaiNpu(Sai):
                     default_speed_mbps = int(float(default_speed[:-1]) * 1000) if default_speed.endswith("G") else int(default_speed)
                     supported_speeds_mbps = {default_speed_mbps}
                     if match.group(4):
+                        # Collect alternate speeds from [10G,40G] bracket list
                         for speed in match.group(4).split(","):
                             speed = speed.strip()
                             supported_speeds_mbps.add(int(float(speed[:-1]) * 1000) if speed.endswith("G") else int(speed))
@@ -436,6 +443,7 @@ class SaiNpu(Sai):
                         "supported_speeds_mbps": sorted(supported_speeds_mbps),
                     })
 
+                # Breakout must not claim more lanes than the physical port has
                 lanes_used = sum(segment["num_assigned_lanes"] for segment in segments)
                 if lanes_used > len(lane_list):
                     raise ValueError(
@@ -443,6 +451,7 @@ class SaiNpu(Sai):
                         f"exceed available {len(lane_list)}"
                     )
 
+                # Number of logical ports must match alias list in platform.json
                 num_logical_ports = sum(segment["num_ports"] for segment in segments)
                 if num_logical_ports != len(logical_port_names):
                     raise ValueError(
@@ -452,8 +461,10 @@ class SaiNpu(Sai):
 
                 lane_id = 0
                 alias_id = 0
+                # Distribute lanes across logical ports in each parsed segment
                 for segment in segments:
                     lanes_per_port = segment["num_assigned_lanes"] // segment["num_ports"]
+                    # Emit one entry per logical port in the segment
                     for _ in range(segment["num_ports"]):
                         lane_end = lane_id + lanes_per_port
                         yield {
