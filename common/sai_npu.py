@@ -378,103 +378,103 @@ class SaiNpu(Sai):
             }
         )
 
-    def _platform_json_path(self):
+    def get_port_breakout_modes(self, port_name=None, breakout_mode=None):
+        """
+        Parse platform.json and return breakout configuration as Python data.
+
+        Each port dict has keys name, index, lanes, modes.
+        Each mode maps to a list of per-logical-port dicts with
+        index, name, mode, alias, lanes, speed_mbps, supported_speeds_mbps.
+        """
+        brkout_pattern = re.compile(r"(\d{1,6})x(\d+(?:\.\d+)?G?)(\[([^\]]+)\])?(\((\d{1,6})\))?")
+
         base = f"{self.asic_dir}/{self.target}"
+        platform_json = f"{base}/platform.json"
         for name in (self.cfg.get("platform"), self.sku):
             if name:
                 path = f"{base}/platform/{name}.json"
                 if os.path.isfile(path):
-                    return path
-        return f"{base}/platform.json"
+                    platform_json = path
+                    break
 
-    def iter_breakout_ports(self, index=None, mode=None):
-        """
-        Yield per-logical-port breakout entries from platform.json.
-        Each item: index, name, mode, alias, lanes, speed_mbps, supported_speeds_mbps.
-        """
-        brkout_pattern = re.compile(r"(\d{1,6})x(\d+(?:\.\d+)?G?)(\[([^\]]+)\])?(\((\d{1,6})\))?")
-        with open(self._platform_json_path()) as f:
-            platform = json.load(f)
+        with open(platform_json) as f:
+            interfaces = json.load(f).get("interfaces", {})
 
-        interface_by_port_index = {}
-        # Build lookup table from all interfaces in platform.json
-        for port_name, port in platform.get("interfaces", {}).items():
-            port_index = int(port["index"].split(",")[0])
-            interface_by_port_index[port_index] = (port_name, port)
+        if port_name is not None and port_name not in interfaces:
+            raise ValueError(f"unknown port {port_name}")
 
-        if index is None:
-            port_indexes = interface_by_port_index.keys()
-        else:
-            port_indexes = [index] if isinstance(index, int) else index
+        ports = interfaces if port_name is None else {port_name: interfaces[port_name]}
+        result = {}
 
-        # Process each requested physical port (e.g. EthernetX at index X)
-        for port_index in sorted(port_indexes):
-            if port_index not in interface_by_port_index:
-                raise ValueError(f"unknown port index {port_index}")
-            port_name, port = interface_by_port_index[port_index]
+        for name, port in ports.items():
             lane_list = port["lanes"].split(",")
             index_list = port["index"].split(",")
+            modes = {}
 
-            # Walk every breakout mode defined for this physical port
-            for breakout_mode, logical_port_names in port["breakout_modes"].items():
-                if mode is not None and breakout_mode != mode:
-                    continue
+            for mode_name, logical_port_names in port["breakout_modes"].items():
                 segments = []
-                # Split compound modes like "1x200G(4)+4x50G(4)" into segments
-                for part in breakout_mode.split("+"):
+                for part in mode_name.split("+"):
                     match = brkout_pattern.match(part)
                     if not match:
                         raise ValueError(f"unsupported breakout mode segment: {part}")
 
-                    num_ports = int(match.group(1))
                     default_speed = match.group(2).strip()
-                    default_speed_mbps = int(float(default_speed[:-1]) * 1000) if default_speed.endswith("G") else int(default_speed)
+                    default_speed_mbps = (int(float(default_speed[:-1]) * 1000) if default_speed.endswith("G") else int(default_speed))
                     supported_speeds_mbps = {default_speed_mbps}
                     if match.group(4):
-                        # Collect alternate speeds from [10G,40G] bracket list
                         for speed in match.group(4).split(","):
                             speed = speed.strip()
                             supported_speeds_mbps.add(int(float(speed[:-1]) * 1000) if speed.endswith("G") else int(speed))
-                    num_assigned_lanes = int(match.group(6)) if match.group(6) else len(lane_list)
+
                     segments.append({
-                        "num_ports": num_ports,
-                        "num_assigned_lanes": num_assigned_lanes,
+                        "num_ports": int(match.group(1)),
+                        "num_assigned_lanes": int(match.group(6)) if match.group(6) else len(lane_list),
                         "default_speed_mbps": default_speed_mbps,
                         "supported_speeds_mbps": sorted(supported_speeds_mbps),
                     })
 
-                # Breakout must not claim more lanes than the physical port has
-                lanes_used = sum(segment["num_assigned_lanes"] for segment in segments)
+                lanes_used = sum(s["num_assigned_lanes"] for s in segments)
                 if lanes_used > len(lane_list):
                     raise ValueError(
-                        f"{port_name} mode {breakout_mode}: assigned lanes {lanes_used} "
+                        f"{name} mode {mode_name}: assigned lanes {lanes_used} "
                         f"exceed available {len(lane_list)}"
                     )
 
-                # Number of logical ports must match alias list in platform.json
-                num_logical_ports = sum(segment["num_ports"] for segment in segments)
+                num_logical_ports = sum(s["num_ports"] for s in segments)
                 if num_logical_ports != len(logical_port_names):
                     raise ValueError(
-                        f"{port_name} mode {breakout_mode}: expected {len(logical_port_names)} "
+                        f"{name} mode {mode_name}: expected {len(logical_port_names)} "
                         f"aliases, breakout defines {num_logical_ports}"
                     )
 
+                logical_ports = []
                 lane_id = 0
                 alias_id = 0
-                # Distribute lanes across logical ports in each parsed segment
                 for segment in segments:
                     lanes_per_port = segment["num_assigned_lanes"] // segment["num_ports"]
-                    # Emit one entry per logical port in the segment
                     for _ in range(segment["num_ports"]):
                         lane_end = lane_id + lanes_per_port
-                        yield {
+                        logical_ports.append({
                             "index": int(index_list[lane_id]),
-                            "name": port_name,
-                            "mode": breakout_mode,
+                            "name": name,
+                            "mode": mode_name,
                             "alias": logical_port_names[alias_id],
                             "lanes": ",".join(lane_list[lane_id:lane_end]),
                             "speed_mbps": segment["default_speed_mbps"],
                             "supported_speeds_mbps": segment["supported_speeds_mbps"],
-                        }
+                        })
                         lane_id += lanes_per_port
                         alias_id += 1
+                modes[mode_name] = logical_ports
+
+            result[name] = {
+                "name": name,
+                "index": int(index_list[0]),
+                "lanes": port["lanes"],
+                "modes": modes,
+            }
+
+        if breakout_mode is not None:
+            return result[port_name]["modes"][breakout_mode]
+
+        return result if port_name is None else result[port_name]
