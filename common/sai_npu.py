@@ -1,4 +1,7 @@
+import glob
 import json
+import os
+import re
 import time
 
 from saichallenger.common.sai import Sai
@@ -375,3 +378,131 @@ class SaiNpu(Sai):
                 "sid": sid,
             }
         )
+
+    @staticmethod
+    def get_port_breakout_modes(port_name=None, breakout_mode=None, npu=None, base_dir=None, testbed=None):
+        """
+        Parse platform.json and return breakout configuration as Python data.
+
+        Each port dict has keys name, index, lanes, modes.
+        Each mode maps to a list of per-logical-port dicts with
+        index, name, mode, alias, lanes, speed_mbps, supported_speeds_mbps.
+        """
+        platform_json = None
+        if npu is not None:
+            base = f"{npu.asic_dir}/{npu.target}"
+            cfg_names = (npu.cfg.get("platform"), npu.sku)
+        elif base_dir is not None and testbed is not None:
+            with open(os.path.join(base_dir, "testbeds", f"{testbed}.json")) as f:
+                npu_cfg = json.load(f)["npu"][0]
+            matches = glob.glob(f"{base_dir}/npu/**/{npu_cfg['asic']}", recursive=True)
+            if not matches:
+                return {}
+            base = os.path.join(matches[0], npu_cfg["target"])
+            cfg_names = (npu_cfg.get("platform"), npu_cfg.get("sku"))
+        else:
+            return {}
+
+        # resolve platform.json from testbed "platform" then "sku" key
+        for name in cfg_names:
+            if name:
+                path = os.path.join(base, "platform", f"{name}.json")
+                if os.path.isfile(path):
+                    platform_json = path
+                    break
+        if platform_json is None:
+            path = os.path.join(base, "platform.json")
+            platform_json = path if os.path.isfile(path) else None
+
+        if not platform_json or not os.path.isfile(platform_json):
+            return {}
+
+        brkout_pattern = re.compile(r"(\d{1,6})x(\d+(?:\.\d+)?G?)(\[([^\]]+)\])?(\((\d{1,6})\))?")
+
+        with open(platform_json) as f:
+            interfaces = json.load(f).get("interfaces", {})
+
+        if port_name is not None and port_name not in interfaces:
+            raise ValueError(f"unknown port {port_name}")
+
+        ports = interfaces if port_name is None else {port_name: interfaces[port_name]}
+        result = {}
+
+        # each physical port from platform.json interfaces
+        for name, port in ports.items():
+            lane_list = port["lanes"].split(",")
+            index_list = port["index"].split(",")
+            modes = {}
+
+            # each breakout mode string (e.g. 1x25G, 4x10G+1x40G)
+            for mode_name, logical_port_names in port["breakout_modes"].items():
+                segments = []
+                # compound modes: split on '+' (e.g. 4x10G+1x40G)
+                for part in mode_name.split("+"):
+                    match = brkout_pattern.match(part)
+                    if not match:
+                        raise ValueError(f"unsupported breakout mode segment: {part}")
+
+                    default_speed = match.group(2).strip()
+                    default_speed_mbps = (int(float(default_speed[:-1]) * 1000) if default_speed.endswith("G") else int(default_speed))
+                    supported_speeds_mbps = {default_speed_mbps}
+                    if match.group(4):
+                        # optional [speed,speed,...] bracket list
+                        for speed in match.group(4).split(","):
+                            speed = speed.strip()
+                            supported_speeds_mbps.add(int(float(speed[:-1]) * 1000) if speed.endswith("G") else int(speed))
+
+                    segments.append({
+                        "num_ports": int(match.group(1)),
+                        "num_assigned_lanes": int(match.group(6)) if match.group(6) else len(lane_list),
+                        "default_speed_mbps": default_speed_mbps,
+                        "supported_speeds_mbps": sorted(supported_speeds_mbps),
+                    })
+
+                lanes_used = sum(s["num_assigned_lanes"] for s in segments)
+                if lanes_used > len(lane_list):
+                    raise ValueError(
+                        f"{name} mode {mode_name}: assigned lanes {lanes_used} "
+                        f"exceed available {len(lane_list)}"
+                    )
+
+                num_logical_ports = sum(s["num_ports"] for s in segments)
+                if num_logical_ports != len(logical_port_names):
+                    raise ValueError(
+                        f"{name} mode {mode_name}: expected {len(logical_port_names)} "
+                        f"aliases, breakout defines {num_logical_ports}"
+                    )
+
+                logical_ports = []
+                lane_id = 0
+                alias_id = 0
+                # map parsed segments to logical port entries
+                for segment in segments:
+                    lanes_per_port = segment["num_assigned_lanes"] // segment["num_ports"]
+                    # one entry per logical port in the segment
+                    for _ in range(segment["num_ports"]):
+                        lane_end = lane_id + lanes_per_port
+                        logical_ports.append({
+                            "index": int(index_list[lane_id]),
+                            "name": name,
+                            "mode": mode_name,
+                            "alias": logical_port_names[alias_id],
+                            "lanes": ",".join(lane_list[lane_id:lane_end]),
+                            "speed_mbps": segment["default_speed_mbps"],
+                            "supported_speeds_mbps": segment["supported_speeds_mbps"],
+                        })
+                        lane_id += lanes_per_port
+                        alias_id += 1
+                modes[mode_name] = logical_ports
+
+            result[name] = {
+                "name": name,
+                "index": int(index_list[0]),
+                "lanes": port["lanes"],
+                "modes": modes,
+            }
+
+        if breakout_mode is not None:
+            return result[port_name]["modes"][breakout_mode]
+
+        return result if port_name is None else result[port_name]
