@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import re
@@ -378,7 +379,8 @@ class SaiNpu(Sai):
             }
         )
 
-    def get_port_breakout_modes(self, port_name=None, breakout_mode=None):
+    @staticmethod
+    def get_port_breakout_modes(port_name=None, breakout_mode=None, npu=None, base_dir=None, testbed=None):
         """
         Parse platform.json and return breakout configuration as Python data.
 
@@ -386,16 +388,36 @@ class SaiNpu(Sai):
         Each mode maps to a list of per-logical-port dicts with
         index, name, mode, alias, lanes, speed_mbps, supported_speeds_mbps.
         """
-        brkout_pattern = re.compile(r"(\d{1,6})x(\d+(?:\.\d+)?G?)(\[([^\]]+)\])?(\((\d{1,6})\))?")
+        platform_json = None
+        if npu is not None:
+            base = f"{npu.asic_dir}/{npu.target}"
+            cfg_names = (npu.cfg.get("platform"), npu.sku)
+        elif base_dir is not None and testbed is not None:
+            with open(os.path.join(base_dir, "testbeds", f"{testbed}.json")) as f:
+                npu_cfg = json.load(f)["npu"][0]
+            matches = glob.glob(f"{base_dir}/npu/**/{npu_cfg['asic']}", recursive=True)
+            if not matches:
+                return {}
+            base = os.path.join(matches[0], npu_cfg["target"])
+            cfg_names = (npu_cfg.get("platform"), npu_cfg.get("sku"))
+        else:
+            return {}
 
-        base = f"{self.asic_dir}/{self.target}"
-        platform_json = f"{base}/platform.json"
-        for name in (self.cfg.get("platform"), self.sku):
+        # resolve platform.json from testbed "platform" then "sku" key
+        for name in cfg_names:
             if name:
-                path = f"{base}/platform/{name}.json"
+                path = os.path.join(base, "platform", f"{name}.json")
                 if os.path.isfile(path):
                     platform_json = path
                     break
+        if platform_json is None:
+            path = os.path.join(base, "platform.json")
+            platform_json = path if os.path.isfile(path) else None
+
+        if not platform_json or not os.path.isfile(platform_json):
+            return {}
+
+        brkout_pattern = re.compile(r"(\d{1,6})x(\d+(?:\.\d+)?G?)(\[([^\]]+)\])?(\((\d{1,6})\))?")
 
         with open(platform_json) as f:
             interfaces = json.load(f).get("interfaces", {})
@@ -406,13 +428,16 @@ class SaiNpu(Sai):
         ports = interfaces if port_name is None else {port_name: interfaces[port_name]}
         result = {}
 
+        # each physical port from platform.json interfaces
         for name, port in ports.items():
             lane_list = port["lanes"].split(",")
             index_list = port["index"].split(",")
             modes = {}
 
+            # each breakout mode string (e.g. 1x25G, 4x10G+1x40G)
             for mode_name, logical_port_names in port["breakout_modes"].items():
                 segments = []
+                # compound modes: split on '+' (e.g. 4x10G+1x40G)
                 for part in mode_name.split("+"):
                     match = brkout_pattern.match(part)
                     if not match:
@@ -422,6 +447,7 @@ class SaiNpu(Sai):
                     default_speed_mbps = (int(float(default_speed[:-1]) * 1000) if default_speed.endswith("G") else int(default_speed))
                     supported_speeds_mbps = {default_speed_mbps}
                     if match.group(4):
+                        # optional [speed,speed,...] bracket list
                         for speed in match.group(4).split(","):
                             speed = speed.strip()
                             supported_speeds_mbps.add(int(float(speed[:-1]) * 1000) if speed.endswith("G") else int(speed))
@@ -450,8 +476,10 @@ class SaiNpu(Sai):
                 logical_ports = []
                 lane_id = 0
                 alias_id = 0
+                # map parsed segments to logical port entries
                 for segment in segments:
                     lanes_per_port = segment["num_assigned_lanes"] // segment["num_ports"]
+                    # one entry per logical port in the segment
                     for _ in range(segment["num_ports"]):
                         lane_end = lane_id + lanes_per_port
                         logical_ports.append({
